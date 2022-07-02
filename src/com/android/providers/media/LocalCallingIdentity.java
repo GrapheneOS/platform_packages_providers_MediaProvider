@@ -45,6 +45,7 @@ import static com.android.providers.media.util.PermissionUtils.checkWriteImagesO
 
 import android.annotation.Nullable;
 import android.app.AppOpsManager;
+import android.app.StorageScope;
 import android.app.compat.CompatChanges;
 import android.compat.annotation.ChangeId;
 import android.compat.annotation.EnabledAfter;
@@ -52,6 +53,8 @@ import android.compat.annotation.EnabledSince;
 import android.content.ContentProvider;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
+import android.content.pm.GosPackageState;
+import android.content.pm.GosPackageStateFlag;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Binder;
 import android.os.Build;
@@ -519,6 +522,11 @@ public class LocalCallingIdentity {
     }
 
     private boolean isLegacyStorageGranted() {
+        GosPackageState ps = getGosPackageState();
+        if (ps.hasFlag(GosPackageStateFlag.STORAGE_SCOPES_ENABLED)) {
+            return false;
+        }
+
         boolean defaultScopedStorage = CompatChanges.isChangeEnabled(
                 DEFAULT_SCOPED_STORAGE, getPackageName(), UserHandle.getUserHandleForUid(uid));
         boolean forceEnableScopedStorage = CompatChanges.isChangeEnabled(
@@ -875,4 +883,40 @@ public class LocalCallingIdentity {
         }
         return builder.toString();
     }
+
+    private volatile GosPackageState gosPackageState;
+
+    @NonNull
+    public GosPackageState getGosPackageState() {
+        GosPackageState cache = gosPackageState;
+        if (cache != null) {
+            return cache;
+        }
+        return gosPackageState = GosPackageState.get(getPackageName(), getUser());
+    }
+
+    // no need for volatile (write-once field guarded by storageScopesResolved)
+    private StorageScope[] storageScopes;
+    private volatile boolean storageScopesResolved;
+
+    @Nullable
+    StorageScope[] getStorageScopes() {
+        if (storageScopesResolved) {
+            return storageScopes;
+        }
+
+        StorageScope[] scopes = null;
+
+        GosPackageState ps = getGosPackageState();
+        if (ps.hasFlag(GosPackageStateFlag.STORAGE_SCOPES_ENABLED)) {
+            scopes = StorageScope.deserializeArray(ps);
+        }
+
+        storageScopes = scopes;
+        storageScopesResolved = true;
+        return scopes;
+    }
+
+    volatile String storageScopesSqlFragment;
+    volatile String storageScopesSqlFragmentForWrite;
 }
