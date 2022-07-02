@@ -114,6 +114,7 @@ import android.app.DownloadManager;
 import android.app.PendingIntent;
 import android.app.RecoverableSecurityException;
 import android.app.RemoteAction;
+import android.app.StorageScope;
 import android.app.admin.DevicePolicyManager;
 import android.app.compat.CompatChanges;
 import android.compat.annotation.ChangeId;
@@ -2449,7 +2450,7 @@ public class MediaProvider extends ContentProvider {
      * A list with empty string[""] is returned if the calling package doesn't have access to the
      * given path.
      *
-     * <p>Directory names are always obtained from lower file system.
+     * <p>When the app has a storage permission, directory names are obtained from lower file system.
      *
      * Called from JNI in jni/MediaProviderWrapper.cpp
      */
@@ -2458,6 +2459,8 @@ public class MediaProvider extends ContentProvider {
         final LocalCallingIdentity token =
                 clearLocalCallingIdentity(getCachedCallingIdentityForFuse(uid));
         PulledMetrics.logFileAccessViaFuse(getCallingUidOrSelf(), path);
+
+        boolean storageScopesQueryBuilderHookInhibited = false;
 
         try {
             if (isPrivatePackagePathNotAccessibleByCaller(path)) {
@@ -2492,6 +2495,12 @@ public class MediaProvider extends ContentProvider {
                 return new String[] {"/"};
             }
 
+            // Paths that belong to app's StorageScopes are handled by shouldBypassFuseRestrictions()
+            // call above. Disable matching against StorageScopes in the queries of this call to
+            // improve performance
+            StorageScopesHooks.inhibitQueryBuilderHook();
+            storageScopesQueryBuilderHookInhibited = true;
+
             // For all other paths, get file names from media provider database.
             // Return media and non-media files visible to the calling package.
             ArrayList<String> fileNamesList = new ArrayList<>();
@@ -2505,14 +2514,36 @@ public class MediaProvider extends ContentProvider {
             queryArgs.putStringArray(QUERY_ARG_SQL_SELECTION_ARGS, new String[] {relativePath});
             // Get database entries for files from MediaProvider database with
             // MediaColumns.RELATIVE_PATH as the given path.
-            try (final Cursor cursor = query(FileUtils.getContentUriForPath(path), projection,
+            final Uri volumeUri = FileUtils.getContentUriForPath(path);
+            try (final Cursor cursor = query(volumeUri, projection,
                     queryArgs, null)) {
                 while(cursor.moveToNext()) {
                     fileNamesList.add(extractDisplayName(cursor.getString(0)));
                 }
             }
-            return fileNamesList.toArray(new String[fileNamesList.size()]);
+
+            final LocalCallingIdentity callingIdentity = mCallingIdentity.get();
+
+            if (relativePath.equals("Android/")
+                    || callingIdentity.hasPermission(PERMISSION_READ_AUDIO)
+                    || callingIdentity.hasPermission(PERMISSION_READ_IMAGES)
+                    || callingIdentity.hasPermission(PERMISSION_READ_VIDEO))
+            {
+                /*
+                Match the behavior of upstream MediaProvider in these cases.
+                (native code will obtain the list of directories from the lower FS when the list
+                of dir entries doesn't have an empty string ("") element)
+                 */
+
+                return fileNamesList.toArray(new String[0]);
+            } else {
+                return StorageScopesHooks.obtainDirContents(this, path, volumeUri, relativePath,
+                        callingIdentity, fileNamesList);
+            }
         } finally {
+            if (storageScopesQueryBuilderHookInhibited) {
+                StorageScopesHooks.uninhibitQueryBuilderHook();
+            }
             restoreLocalCallingIdentity(token);
         }
     }
@@ -3099,7 +3130,8 @@ public class MediaProvider extends ContentProvider {
                     }
                 }
             }
-            if (newRelativePath.length == 1 && TextUtils.isEmpty(newRelativePath[0])) {
+            if (newRelativePath.length == 1 && TextUtils.isEmpty(newRelativePath[0])
+                    && !StorageScopesHooks.shouldRelaxWriteRestrictions(mCallingIdentity.get())) {
                 Log.e(TAG, errorMessage +  newPath + " is in root folder."
                         + " Renaming a file/directory to root folder is not allowed");
                 return OsConstants.EPERM;
@@ -3938,7 +3970,8 @@ public class MediaProvider extends ContentProvider {
 
             // Allow apps with MANAGE_EXTERNAL_STORAGE to create files anywhere
             if (!validPath) {
-                validPath = isCallingPackageManager();
+                validPath = isCallingPackageManager()
+                        || StorageScopesHooks.shouldRelaxWriteRestrictions(mCallingIdentity.get());
             }
 
             // Allow system gallery to create image/video files.
@@ -5162,8 +5195,10 @@ public class MediaProvider extends ContentProvider {
             includeVolumes = bindList(volumeName);
         }
         final String sharedPackages = getSharedPackages();
-        final String matchSharedPackagesClause = FileColumns.OWNER_PACKAGE_NAME + " IN "
-                + sharedPackages;
+
+        final String origMatchSharedPackagesClause = FileColumns.OWNER_PACKAGE_NAME + " IN " + sharedPackages;
+        final String matchSharedPackagesClause = StorageScopesHooks.maybeModifyMatchSharedPackagesClause(
+                origMatchSharedPackagesClause, mCallingIdentity.get(), forWrite);
 
         boolean allowGlobal;
         final Uri redactedUri = extras.getParcelable(QUERY_ARG_REDACTED_URI);
@@ -6394,6 +6429,42 @@ public class MediaProvider extends ContentProvider {
                 Bundle bundle = new Bundle();
                 bundle.putBoolean(MediaStore.USES_FUSE_PASSTHROUGH_RESULT, isEnabled);
                 return bundle;
+            }
+            case StorageScope.MEDIA_PROVIDER_METHOD_INVALIDATE_MEDIA_PROVIDER_CACHE: {
+                // the only caller of this method is PermissionController
+                getContext().enforceCallingPermission(android.Manifest.permission.GRANT_RUNTIME_PERMISSIONS, null);
+
+                String packageName = extras.getString(Intent.EXTRA_PACKAGE_NAME);
+                invalidateLocalCallingIdentityCache(packageName, "StorageScopes");
+
+                ArrayList<String> changedPaths = extras.getStringArrayList(Intent.EXTRA_TEXT);
+
+                if (changedPaths == null) {
+                    return null;
+                }
+
+                ArraySet<Uri> changedVolumes = new ArraySet<>();
+
+                for (String changedPath : changedPaths) {
+                    changedVolumes.add(FileUtils.getContentUriForPath(changedPath));
+                }
+
+                for (Uri volume : changedVolumes) {
+                    final DatabaseHelper helper;
+                    try {
+                        helper = getDatabaseForUri(volume);
+                    } catch (MediaProvider.VolumeNotFoundException e) {
+                        throw new IllegalStateException(e);
+                    }
+
+                    // needed to update the "generation number" that is used by apps to detect
+                    // MediaStore changes, see MediaStore#getGeneration(Context, String volumeName)
+                    helper.beginTransaction();
+                    helper.setTransactionSuccessful();
+                    helper.endTransaction();
+                }
+
+                return null;
             }
             default:
                 throw new UnsupportedOperationException("Unsupported call: " + method);
@@ -8279,7 +8350,8 @@ public class MediaProvider extends ContentProvider {
         final boolean callerIsOwner = Objects.equals(getCallingPackageOrSelf(), ownerPackageName);
         // Figure out if we need to redact contents
         final boolean redactionNeeded =
-                (redactedUri != null) || (!callerIsOwner && isRedactionNeeded(uri));
+                (redactedUri != null) || (!callerIsOwner && isRedactionNeeded(uri)
+                        && !StorageScopesHooks.shouldBypassMediaLocationPermissionCheck(mCallingIdentity.get(), file));
         final RedactionInfo redactionInfo;
         try {
             redactionInfo = redactionNeeded ? getRedactionRanges(file)
@@ -8463,7 +8535,14 @@ public class MediaProvider extends ContentProvider {
                 // database updates for SystemGallery targeting R or above on R OS.
                 return false;
             }
-            return mCallingIdentity.get().shouldBypassDatabase(true /*isSystemGallery*/);
+            LocalCallingIdentity callingIdentity = mCallingIdentity.get();
+            boolean res = callingIdentity.shouldBypassDatabase(true /*isSystemGallery*/);
+
+            if (res && callingIdentity.getStorageScopes() != null) {
+                return false;
+            }
+
+            return res;
         }
         return false;
     }
@@ -8507,6 +8586,10 @@ public class MediaProvider extends ContentProvider {
         }
 
         if (isCallingPackageManager()) {
+            return true;
+        }
+
+        if (StorageScopesHooks.isAllowedPath(filePath, mCallingIdentity.get(), forWrite)) {
             return true;
         }
 
@@ -9261,7 +9344,9 @@ public class MediaProvider extends ContentProvider {
 
             final String mimeType = MimeUtils.resolveMimeType(new File(path));
 
-            if (shouldBypassFuseRestrictions(/*forWrite*/ true, path)) {
+            if (shouldBypassFuseRestrictions(/*forWrite*/ true, path)
+                    || StorageScopesHooks.shouldRelaxWriteRestrictions(mCallingIdentity.get()))
+            {
                 final boolean callerRequestingLegacy = isCallingPackageRequestingLegacy();
                 if (!fileExists(path)) {
                     // If app has already inserted the db row, inserting the row again might set
@@ -9494,6 +9579,10 @@ public class MediaProvider extends ContentProvider {
                 if (isTopLevelDir) {
                     // We don't allow deletion of any top-level folders
                     if (accessType == DIRECTORY_ACCESS_FOR_DELETE) {
+                        if (StorageScopesHooks.shouldRelaxWriteRestrictions(mCallingIdentity.get())) {
+                            return 0;
+                        }
+
                         Log.e(TAG, "Deleting top level directories are not allowed!");
                         return OsConstants.EACCES;
                     }
@@ -9503,6 +9592,10 @@ public class MediaProvider extends ContentProvider {
                     if ((accessType == DIRECTORY_ACCESS_FOR_CREATE
                             || accessType == DIRECTORY_ACCESS_FOR_WRITE)
                             && FileUtils.isDefaultDirectoryName(extractDisplayName(path))) {
+                        return 0;
+                    }
+
+                    if (StorageScopesHooks.shouldRelaxWriteRestrictions(mCallingIdentity.get())) {
                         return 0;
                     }
 
