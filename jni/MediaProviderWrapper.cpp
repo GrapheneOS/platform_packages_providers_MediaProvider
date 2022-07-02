@@ -132,7 +132,7 @@ bool isUidAllowedAccessToDataOrObbPathInternal(JNIEnv* env, jobject media_provid
 
 std::vector<std::shared_ptr<DirectoryEntry>> getFilesInDirectoryInternal(
         JNIEnv* env, jobject media_provider_object, jmethodID mid_get_files_in_dir, uid_t uid,
-        const string& path) {
+        const string& path, bool* skip_add_dirs) {
     std::vector<std::shared_ptr<DirectoryEntry>> directory_entries;
     ScopedLocalRef<jstring> j_path(env, env->NewStringUTF(path.c_str()));
 
@@ -161,6 +161,8 @@ std::vector<std::shared_ptr<DirectoryEntry>> getFilesInDirectoryInternal(
         }
     }
 
+    int de_type = DT_REG;
+
     for (int i = 0; i < de_count; i++) {
         ScopedLocalRef<jstring> j_d_name(env,
                                          (jstring)env->GetObjectArrayElement(files_list.get(), i));
@@ -172,7 +174,14 @@ std::vector<std::shared_ptr<DirectoryEntry>> getFilesInDirectoryInternal(
             directory_entries.push_back(std::make_shared<DirectoryEntry>("", EFAULT));
             break;
         }
-        directory_entries.push_back(std::make_shared<DirectoryEntry>(d_name.c_str(), DT_REG));
+
+        if (d_name.c_str()[0] == 0) { // see StorageScopesHooks#obtainDirContents
+            de_type = DT_DIR;
+            *skip_add_dirs = true;
+            continue;
+        }
+
+        directory_entries.push_back(std::make_shared<DirectoryEntry>(d_name.c_str(), de_type));
     }
     return directory_entries;
 }
@@ -397,7 +406,8 @@ std::vector<std::shared_ptr<DirectoryEntry>> MediaProviderWrapper::GetDirectoryE
     }
 
     JNIEnv* env = MaybeAttachCurrentThread();
-    res = getFilesInDirectoryInternal(env, media_provider_object_, mid_get_files_in_dir_, uid, path);
+    bool skip_add_dirs = false;
+    res = getFilesInDirectoryInternal(env, media_provider_object_, mid_get_files_in_dir_, uid, path, &skip_add_dirs);
 
     const int res_size = res.size();
     if (res_size && res[0]->d_name[0] == '/') {
@@ -406,7 +416,9 @@ std::vector<std::shared_ptr<DirectoryEntry>> MediaProviderWrapper::GetDirectoryE
         addDirectoryEntriesFromLowerFs(dirp, /* filter */ nullptr, &res);
     } else if (res_size == 0 || !res[0]->d_name.empty()) {
         // add directory names from lower file system.
-        addDirectoryEntriesFromLowerFs(dirp, /* filter */ &isDirectory, &res);
+        if (!skip_add_dirs) {
+            addDirectoryEntriesFromLowerFs(dirp, /* filter */ &isDirectory, &res);
+        }
     }
     return res;
 }

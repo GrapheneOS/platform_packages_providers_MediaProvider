@@ -182,7 +182,8 @@ public class PermissionActivity extends Activity {
         createProgressDialog();
 
         if (!shouldShowActionDialog(this, -1 /* pid */, appInfo.uid, getCallingPackage(),
-                null /* attributionTag */, verb)) {
+                null /* attributionTag */, verb)
+                || StorageScopesHooks.shouldSkipConfirmationDialog(this, getCallingPackage(), uris)) {
             onPositiveAction(null, 0);
             return;
         }
