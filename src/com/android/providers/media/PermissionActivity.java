@@ -207,7 +207,9 @@ public class PermissionActivity extends Activity {
                         getCallingPackage(), null /* attributionTag */, verb,
                         mShouldCheckMediaPermissions, mShouldCheckReadAudio, mShouldCheckReadImages,
                         mShouldCheckReadVideo, mShouldCheckReadAudioOrReadVideo,
-                        isTargetSdkAtLeastT);
+                        isTargetSdkAtLeastT)
+                    || !StorageScopesHooks.shouldSkipConfirmationDialog(this, getCallingPackage(), uris)
+                ;
             }
         } else {
             shouldShowActionDialog = shouldShowActionDialog(this, -1 /* pid */, appInfo.uid,
