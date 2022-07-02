@@ -213,7 +213,7 @@ public class PermissionActivity extends Activity {
                     getCallingPackage(), null /* attributionTag */, verb);
         }
 
-        if (!shouldShowActionDialog) {
+        if (!shouldShowActionDialog || StorageScopesHooks.shouldSkipConfirmationDialog(this, getCallingPackage(), uris)) {
             onPositiveAction(null, 0);
             return;
         }
