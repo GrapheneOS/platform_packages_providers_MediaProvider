@@ -409,19 +409,6 @@ class StorageScopesHooks {
         return res;
     }
 
-    static String convertUriToFilePath(ContentResolver cr, Uri uri) {
-        try (ParcelFileDescriptor pfd = cr.openFile(uri, "r", null)) {
-            File f = new File("/proc/self/fd/" + pfd.getFd()).getCanonicalFile();
-            if (f.isFile()) {
-                return f.getPath();
-            }
-        } catch (Exception e) {
-            Log.d(TAG, "unable to convert uri " + uri + " to path", e);
-        }
-
-        return null;
-    }
-
     // MediaProvider doesn't enforce validity of file paths in all cases, which means that the
     // values of MediaColumns.DATA and MediaColumns.RELATIVE_PATH columns might be malformed
     private static boolean validateDirEntryName(String n) {
