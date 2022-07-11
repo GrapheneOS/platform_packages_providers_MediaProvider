@@ -5763,18 +5763,6 @@ public class MediaProvider extends ContentProvider {
                     restoreLocalCallingIdentity(token);
                 }
 
-            case StorageScope.MEDIA_PROVIDER_METHOD_CONVERT_URI_TO_FILE_PATH: {
-                // the only caller of this method is PermissionController
-                getContext().enforceCallingPermission(android.Manifest.permission.GRANT_RUNTIME_PERMISSIONS, null);
-                String path = StorageScopesHooks.convertUriToFilePath(getContext().getContentResolver(), Uri.parse(arg));
-                if (path == null) {
-                    return null;
-                }
-                Bundle res = new Bundle();
-                res.putString(Intent.EXTRA_TEXT, path);
-                return res;
-            }
-
             case StorageScope.MEDIA_PROVIDER_METHOD_INVALIDATE_MEDIA_PROVIDER_CACHE: {
                 // the only caller of this method is PermissionController
                 getContext().enforceCallingPermission(android.Manifest.permission.GRANT_RUNTIME_PERMISSIONS, null);
