@@ -7769,7 +7769,14 @@ public class MediaProvider extends ContentProvider {
                 // database updates for SystemGallery targeting R or above on R OS.
                 return false;
             }
-            return mCallingIdentity.get().shouldBypassDatabase(true /*isSystemGallery*/);
+            LocalCallingIdentity callingIdentity = mCallingIdentity.get();
+            boolean res = callingIdentity.shouldBypassDatabase(true /*isSystemGallery*/);
+
+            if (res && callingIdentity.getStorageScopes() != null) {
+                return false;
+            }
+
+            return res;
         }
         return false;
     }
