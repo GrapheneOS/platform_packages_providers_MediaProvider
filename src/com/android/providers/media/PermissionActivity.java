@@ -207,16 +207,14 @@ public class PermissionActivity extends Activity {
                         getCallingPackage(), null /* attributionTag */, verb,
                         mShouldCheckMediaPermissions, mShouldCheckReadAudio, mShouldCheckReadImages,
                         mShouldCheckReadVideo, mShouldCheckReadAudioOrReadVideo,
-                        isTargetSdkAtLeastT)
-                    || !StorageScopesHooks.shouldSkipConfirmationDialog(this, getCallingPackage(), uris)
-                ;
+                        isTargetSdkAtLeastT);
             }
         } else {
             shouldShowActionDialog = shouldShowActionDialog(this, -1 /* pid */, appInfo.uid,
                     getCallingPackage(), null /* attributionTag */, verb);
         }
 
-        if (!shouldShowActionDialog) {
+        if (!shouldShowActionDialog || StorageScopesHooks.shouldSkipConfirmationDialog(this, getCallingPackage(), uris)) {
             onPositiveAction(null, 0);
             return;
         }
