@@ -6466,6 +6466,28 @@ public class MediaProvider extends ContentProvider {
 
                 return null;
             }
+            case StorageScope.MEDIA_PROVIDER_METHOD_MEDIA_ID_TO_FILE_PATH: {
+                // the only caller of this method is PermissionController
+                getContext().enforceCallingPermission(android.Manifest.permission.GRANT_RUNTIME_PERMISSIONS, null);
+
+                String mediaId = arg;
+                Uri uri = MediaStore.Files.getContentUri(MediaStore.VOLUME_EXTERNAL, Long.parseLong(mediaId));
+
+                final CallingIdentity providerToken = clearCallingIdentity();
+                try {
+                    File f = queryForDataFile(uri, null);
+                    if (f != null) {
+                        var res = new Bundle();
+                        res.putString(mediaId, f.getAbsolutePath());
+                        return res;
+                    }
+                } catch (IOException e) {
+                    Log.d(TAG, "", e);
+                } finally {
+                    restoreCallingIdentity(providerToken);
+                }
+                return null;
+            }
             default:
                 throw new UnsupportedOperationException("Unsupported call: " + method);
         }
