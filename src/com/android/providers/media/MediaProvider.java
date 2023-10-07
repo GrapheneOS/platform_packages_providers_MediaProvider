@@ -5991,10 +5991,33 @@ public class MediaProvider extends ContentProvider {
                 extras));
 
 
-        String storageScopesWhereClause = StorageScopesHooks.getWhereClause(mCallingIdentity.get(), forWrite);
-        if (storageScopesWhereClause != null) {
-            // Allow access to files that the user selected via Storage Scopes
-            options.add(storageScopesWhereClause);
+        // keep in sync with AccessChecker.getWhereForConstrainedAccess()
+        switch (uriType) {
+            case AUDIO_ARTISTS_ID:
+            case AUDIO_ARTISTS:
+            case AUDIO_ARTISTS_ID_ALBUMS:
+            case AUDIO_ALBUMS_ID:
+            case AUDIO_ALBUMS:
+            case AUDIO_ALBUMART_ID:
+            case AUDIO_ALBUMART:
+            case AUDIO_GENRES_ID:
+            case AUDIO_GENRES:
+            case AUDIO_MEDIA_ID_GENRES_ID:
+            case AUDIO_MEDIA_ID_GENRES:
+            case AUDIO_GENRES_ID_MEMBERS:
+            case AUDIO_GENRES_ALL_MEMBERS:
+            case AUDIO_PLAYLISTS_ID_MEMBERS_ID:
+            case AUDIO_PLAYLISTS_ID_MEMBERS:
+                // these Uri types don't support scoped access
+                break;
+            default: {
+                String storageScopesWhereClause = StorageScopesHooks.getWhereClause(mCallingIdentity.get(), forWrite);
+                if (storageScopesWhereClause != null) {
+                    // Allow access to files that the user selected via Storage Scopes
+                    options.add(storageScopesWhereClause);
+                }
+                break;
+            }
         }
 
         appendWhereStandalone(qb, TextUtils.join(" OR ", options));
