@@ -32,8 +32,6 @@ filegroup {
 android_app {
     name: "PdfViewer",
     srcs: [":pdfviewer-sources"],
-    updatable: true,
-    certificate: ":com.android.graphics.pdf.certificate",
     sdk_version: "module_current",
     min_sdk_version: "30",
     apex_available: ["com.android.mediaprovider"],
