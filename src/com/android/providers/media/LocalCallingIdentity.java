@@ -52,6 +52,7 @@ import android.content.ContentProvider;
 import android.content.Context;
 import android.content.pm.ApplicationInfo;
 import android.content.pm.GosPackageState;
+import android.content.pm.GosPackageStateFlag;
 import android.content.pm.PackageManager.NameNotFoundException;
 import android.os.Binder;
 import android.os.Build;
@@ -450,7 +451,7 @@ public class LocalCallingIdentity {
 
     private boolean isLegacyStorageGranted() {
         GosPackageState ps = getGosPackageState();
-        if (ps != null && ps.hasFlag(GosPackageState.FLAG_STORAGE_SCOPES_ENABLED)) {
+        if (ps.hasFlag(GosPackageStateFlag.STORAGE_SCOPES_ENABLED)) {
             return false;
         }
 
@@ -796,21 +797,15 @@ public class LocalCallingIdentity {
         return builder.toString();
     }
 
-    // no need for volatile (write-once field guarded by gosPackageStateResolved)
-    private GosPackageState gosPackageState;
-    private volatile boolean gosPackageStateResolved;
+    private volatile GosPackageState gosPackageState;
 
-    @Nullable
+    @NonNull
     public GosPackageState getGosPackageState() {
-        if (gosPackageStateResolved) {
-            return gosPackageState;
+        GosPackageState cache = gosPackageState;
+        if (cache != null) {
+            return cache;
         }
-
-        GosPackageState s = UserHandle.getAppId(uid) != Process.SYSTEM_UID ?
-                GosPackageState.get(getPackageName()) : null;
-        gosPackageState = s;
-        gosPackageStateResolved = true;
-        return s;
+        return gosPackageState = GosPackageState.get(getPackageName(), getUser());
     }
 
     // no need for volatile (write-once field guarded by storageScopesResolved)
@@ -826,7 +821,7 @@ public class LocalCallingIdentity {
         StorageScope[] scopes = null;
 
         GosPackageState ps = getGosPackageState();
-        if (ps != null && ps.hasFlag(GosPackageState.FLAG_STORAGE_SCOPES_ENABLED)) {
+        if (ps.hasFlag(GosPackageStateFlag.STORAGE_SCOPES_ENABLED)) {
             scopes = StorageScope.deserializeArray(ps);
         }
 

@@ -17,11 +17,13 @@
 package com.android.providers.media;
 
 import android.annotation.Nullable;
+import android.annotation.UserIdInt;
 import android.app.StorageScope;
 import android.content.ContentResolver;
 import android.content.Context;
 import android.content.pm.GosPackageState;
 import android.database.Cursor;
+import android.ext.DerivedPackageFlag;
 import android.net.Uri;
 import android.os.Bundle;
 import android.provider.MediaStore.MediaColumns;
@@ -35,9 +37,9 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.List;
 
-import static android.content.pm.GosPackageState.DFLAG_EXPECTS_ALL_FILES_ACCESS;
-import static android.content.pm.GosPackageState.DFLAG_EXPECTS_STORAGE_WRITE_ACCESS;
-import static android.content.pm.GosPackageState.FLAG_STORAGE_SCOPES_ENABLED;
+import static android.ext.DerivedPackageFlag.EXPECTS_ALL_FILES_ACCESS;
+import static android.ext.DerivedPackageFlag.EXPECTS_STORAGE_WRITE_ACCESS;
+import static android.content.pm.GosPackageStateFlag.STORAGE_SCOPES_ENABLED;
 
 class StorageScopesHooks {
 
@@ -173,10 +175,9 @@ class StorageScopesHooks {
      */
     static boolean shouldRelaxWriteRestrictions(LocalCallingIdentity callingIdentity) {
         GosPackageState ps = callingIdentity.getGosPackageState();
-        int requiredDflags = DFLAG_EXPECTS_ALL_FILES_ACCESS | DFLAG_EXPECTS_STORAGE_WRITE_ACCESS;
-        return ps != null
-                && ps.hasFlag(FLAG_STORAGE_SCOPES_ENABLED)
-                && (ps.derivedFlags & requiredDflags) == requiredDflags;
+        return ps.hasFlag(STORAGE_SCOPES_ENABLED)
+                && ps.hasDerivedFlag(EXPECTS_ALL_FILES_ACCESS)
+                && ps.hasDerivedFlag(EXPECTS_STORAGE_WRITE_ACCESS);
     }
 
     private static final ThreadLocal<Boolean> queryBuilderHookInhibited = new ThreadLocal<>();
@@ -209,18 +210,15 @@ class StorageScopesHooks {
     }
 
     // PermissionActivity, after shouldShowActionDialog() returns true
-    static boolean shouldSkipConfirmationDialog(Context context, String packageName, List<Uri> uris) {
+    static boolean shouldSkipConfirmationDialog(Context context, String packageName, @UserIdInt int userId, List<Uri> uris) {
         if (uris.size() > 10) {
             // checking each Uri is slow when there's too many of them
             return false;
         }
 
-        GosPackageState ps = GosPackageState.get(packageName);
-        if (ps == null) {
-            return false;
-        }
+        GosPackageState ps = GosPackageState.get(packageName, userId);
 
-        if (!(ps.hasDerivedFlag(GosPackageState.DFLAG_HAS_MANAGE_MEDIA_DECLARATION) && ps.hasFlag(FLAG_STORAGE_SCOPES_ENABLED))) {
+        if (!(ps.hasDerivedFlag(DerivedPackageFlag.HAS_MANAGE_MEDIA_DECLARATION) && ps.hasFlag(STORAGE_SCOPES_ENABLED))) {
             return false;
         }
 
@@ -251,7 +249,7 @@ class StorageScopesHooks {
     static boolean shouldBypassMediaLocationPermissionCheck(LocalCallingIdentity callingIdentity, File file) {
         GosPackageState ps = callingIdentity.getGosPackageState();
 
-        if (ps == null || !ps.hasDerivedFlag(GosPackageState.DFLAG_HAS_ACCESS_MEDIA_LOCATION_DECLARATION)) {
+        if (!ps.hasDerivedFlag(DerivedPackageFlag.HAS_ACCESS_MEDIA_LOCATION_DECLARATION)) {
             return false;
         }
 

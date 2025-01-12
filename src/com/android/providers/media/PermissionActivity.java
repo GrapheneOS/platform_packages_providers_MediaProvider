@@ -58,6 +58,7 @@ import android.os.AsyncTask;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
+import android.os.UserHandle;
 import android.provider.MediaStore;
 import android.provider.MediaStore.MediaColumns;
 import android.text.TextUtils;
@@ -227,7 +228,8 @@ public class PermissionActivity extends Activity {
                     getCallingPackage(), null /* attributionTag */, verb);
         }
 
-        if (!shouldShowActionDialog || StorageScopesHooks.shouldSkipConfirmationDialog(this, getCallingPackage(), uris)) {
+        if (!shouldShowActionDialog || StorageScopesHooks.shouldSkipConfirmationDialog(this,
+                    getCallingPackage(), UserHandle.getUserId(appInfo.uid), uris)) {
             onPositiveAction(null, 0);
             return;
         }
