@@ -246,6 +246,14 @@ class MediaProviderWrapper final {
     bool IsAppCloneUser(uid_t userId);
 
     /**
+     * Determines if the provided path has ignorable code point
+     *
+     * @param path
+     * @return true
+     */
+    bool HasIgnorableCodePointsOnPath(const std::string& path);
+
+    /**
      * Initializes per-process static variables associated with the lifetime of
      * a managed runtime.
      */
@@ -271,6 +279,7 @@ class MediaProviderWrapper final {
     jmethodID mid_on_file_created_;
     jmethodID mid_should_allow_lookup_;
     jmethodID mid_is_app_clone_user_;
+    jmethodID mid_has_ignoreable_code_points_on_path;
     jmethodID mid_transform_;
     jmethodID mid_file_lookup_;
     /** Cached FileLookupResult field IDs **/

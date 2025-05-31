@@ -1861,4 +1861,16 @@ public class FileUtils {
         Objects.requireNonNull(file);
         return file.getCanonicalFile();
     }
+
+    public static boolean hasIgnorableCodePointCharsOnPath(@NonNull String path) {
+        int size = path.length();
+        for (int i = 0; i < size; ++i) {
+            int codePoint = Character.codePointAt(path, i);
+            int propToIgnore = android.icu.lang.UProperty.DEFAULT_IGNORABLE_CODE_POINT;
+            if (android.icu.lang.UCharacter.hasBinaryProperty(codePoint, propToIgnore)) {
+                return true;
+            }
+        }
+        return false;
+    }
 }

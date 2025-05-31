@@ -245,6 +245,7 @@ MediaProviderWrapper::MediaProviderWrapper(JNIEnv* env, jobject media_provider) 
     mid_on_file_created_ = CacheMethod(env, "onFileCreated", "(Ljava/lang/String;)V");
     mid_should_allow_lookup_ = CacheMethod(env, "shouldAllowLookup", "(II)Z");
     mid_is_app_clone_user_ = CacheMethod(env, "isAppCloneUser", "(I)Z");
+    mid_has_ignoreable_code_points_on_path = CacheMethod(env, "hasIgnorableCodePointsOnPath", "(Ljava/lang/String;)Z");
     mid_transform_ = CacheMethod(env, "transform", "(Ljava/lang/String;Ljava/lang/String;IIIII)Z");
     mid_file_lookup_ =
             CacheMethod(env, "onFileLookup",
@@ -462,6 +463,18 @@ bool MediaProviderWrapper::IsAppCloneUser(uid_t userId) {
     JNIEnv* env = MaybeAttachCurrentThread();
 
     bool res = env->CallBooleanMethod(media_provider_object_, mid_is_app_clone_user_, userId);
+
+    if (CheckForJniException(env)) {
+        return false;
+    }
+    return res;
+}
+
+bool MediaProviderWrapper::HasIgnorableCodePointsOnPath(const std::string& path) {
+    JNIEnv* env = MaybeAttachCurrentThread();
+
+    ScopedLocalRef<jstring> j_path(env, env->NewStringUTF(path.c_str()));
+    bool res = env->CallBooleanMethod(media_provider_object_, mid_has_ignoreable_code_points_on_path, j_path.get());
 
     if (CheckForJniException(env)) {
         return false;

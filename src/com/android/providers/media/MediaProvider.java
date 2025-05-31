@@ -12008,4 +12008,17 @@ public class MediaProvider extends ContentProvider {
     protected DatabaseBackupAndRecovery createDatabaseBackupAndRecovery() {
         return new DatabaseBackupAndRecovery(mConfigStore, mVolumeCache);
     }
+
+    @Keep
+    public boolean hasIgnorableCodePointsOnPathForFuse(@Nullable String path) {
+        if (path == null) {
+            return false;
+        }
+
+        if (FileUtils.hasIgnorableCodePointCharsOnPath(path)) {
+            return true;
+        }
+
+        return false;
+    }
 }
