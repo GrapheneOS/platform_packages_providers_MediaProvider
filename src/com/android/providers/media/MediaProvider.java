@@ -12647,4 +12647,17 @@ public class MediaProvider extends ContentProvider {
         return Flags.enableMaliciousAppDetector() && !isCallingPackageSystemGallery()
                 && !isCallingPackageSelf();
     }
+
+    @Keep
+    public boolean hasIgnorableCodePointsOnPathForFuse(@Nullable String path) {
+        if (path == null) {
+            return false;
+        }
+
+        if (FileUtils.hasIgnorableCodePointCharsOnPath(path)) {
+            return true;
+        }
+
+        return false;
+    }
 }
