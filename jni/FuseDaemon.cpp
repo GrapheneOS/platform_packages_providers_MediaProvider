@@ -974,6 +974,12 @@ static node* do_lookup(fuse_req_t req, fuse_ino_t parent, const char* name,
     logger.setVolumeFromPath(child_path);
     logger.setCallingPackageUid(req->ctx.uid);
 
+    if (validate_access && fuse->mp && fuse->mp->HasIgnorableCodePointsOnPath(child_path)) {
+        LOG(ERROR) << "do_lookup blocked: child path contains ignorable code points: " << child_path;
+        *error_code = EACCES;
+        return nullptr;
+    }
+
     if (validate_access && !is_user_accessible_path(req, fuse, child_path)) {
         *error_code = EACCES;
         logger.setLogMetric(false);

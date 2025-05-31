@@ -13136,6 +13136,19 @@ public class MediaProvider extends ContentProvider {
         });
     }
 
+    @Keep
+    public boolean hasIgnorableCodePointsOnPathForFuse(@Nullable String path) {
+        if (path == null) {
+            return false;
+        }
+
+        if (FileUtils.hasIgnorableCodePointCharsOnPath(path)) {
+            return true;
+        }
+
+        return false;
+    }
+
     /**
      * Checks if file trash and restore functionality is enabled.
      * This is determined by a feature flag and if the calling app's target SDK version is greater
