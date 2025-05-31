@@ -12785,6 +12785,19 @@ public class MediaProvider extends ContentProvider {
         });
     }
 
+    @Keep
+    public boolean hasIgnorableCodePointsOnPathForFuse(@Nullable String path) {
+        if (path == null) {
+            return false;
+        }
+
+        if (FileUtils.hasIgnorableCodePointCharsOnPath(path)) {
+            return true;
+        }
+
+        return false;
+    }
+
     /**
      * <b>FOT TESTING PURPOSES ONLY</b>
      * <p>
