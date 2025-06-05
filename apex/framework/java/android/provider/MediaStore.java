@@ -1710,12 +1710,6 @@ public final class MediaStore {
         Objects.requireNonNull(resolver);
         Objects.requireNonNull(uris);
 
-        final ContentValues values = new ContentValues();
-        if (areFavorites) {
-            values.put(MediaColumns.IS_FAVORITE, 1);
-        } else {
-            values.put(MediaColumns.IS_FAVORITE, 0);
-        }
         final Iterator<Uri> it = uris.iterator();
         final ClipData clipData = ClipData.newRawUri(null, it.next());
         while (it.hasNext()) {
@@ -1724,7 +1718,7 @@ public final class MediaStore {
 
         final Bundle extras = new Bundle();
         extras.putParcelable(EXTRA_CLIP_DATA, clipData);
-        extras.putParcelable(EXTRA_CONTENT_VALUES, values);
+        extras.putBoolean(MediaColumns.IS_FAVORITE, areFavorites);
         resolver.call(AUTHORITY, MARK_MEDIA_AS_FAVORITE, null, extras);
     }
 
