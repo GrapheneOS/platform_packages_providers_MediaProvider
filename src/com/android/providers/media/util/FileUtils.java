@@ -1930,6 +1930,10 @@ public class FileUtils {
             if (android.icu.lang.UCharacter.hasBinaryProperty(codePoint, propToIgnore)) {
                 return true;
             }
+            int charCount = Character.charCount(codePoint);
+            if (charCount > 1) {
+                i += charCount - 1;
+            }
         }
         return false;
     }
