@@ -1376,6 +1376,30 @@ public class FileUtilsTest {
     }
 
     @Test
+    public void testPathHasIgnorableCodePoint() {
+        {
+            String path = "/storage/emulated/0/Ringtones/a.mp3";
+            assertWithMessage("Expected has no ignorable code point for " + path)
+                    .that(FileUtils.hasIgnorableCodePointCharsOnPath(path)).isFalse();
+        }
+        {
+            String path = "/storage/emulated/0/Ringtones\u200B/a.mp3";
+            assertWithMessage("Expected has ignorable code point for " + path)
+                    .that(FileUtils.hasIgnorableCodePointCharsOnPath(path)).isTrue();
+        }
+        {
+            String path = "/storage/emulated/0/Ringtones/\u200Ba.mp3";
+            assertWithMessage("Expected has ignorable code point for " + path)
+                    .that(FileUtils.hasIgnorableCodePointCharsOnPath(path)).isTrue();
+        }
+        {
+            String path = "/storage/emulated/0/\u200BRingtones/\u200Ba.mp3";
+            assertWithMessage("Expected has ignorable code point for " + path)
+                    .that(FileUtils.hasIgnorableCodePointCharsOnPath(path)).isTrue();
+        }
+    }
+
+    @Test
     @SdkSuppress(minSdkVersion = Build.VERSION_CODES.S)
     @EnableFlags(Flags.FLAG_ENABLE_PATH_SANITIZATION)
     public void testNormalizeAndFilterDefaultIgnorableCodepoints() {
