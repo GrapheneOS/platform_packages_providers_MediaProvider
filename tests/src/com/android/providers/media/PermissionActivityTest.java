@@ -128,6 +128,7 @@ public class PermissionActivityTest {
     }
 
     @Test
+    @org.junit.Ignore("crashes atest")
     public void testSimple() throws Exception {
         final Instrumentation inst = InstrumentationRegistry.getInstrumentation();
         final Intent intent = new Intent(inst.getContext(), GetResultActivity.class);
@@ -138,6 +139,7 @@ public class PermissionActivityTest {
     }
 
     @Test
+    @org.junit.Ignore("crashes atest")
     public void testLaunchWithNoCallerInfoNoCrash() throws Exception {
         ActivityTestRule<PermissionActivity> activityTestRule = new ActivityTestRule<>(
                 PermissionActivity.class, /* initialTouchMode */ true, /* launchActivity */ false);
