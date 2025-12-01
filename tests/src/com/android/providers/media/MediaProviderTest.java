@@ -39,6 +39,7 @@ import static org.junit.Assert.assertNotNull;
 import static org.junit.Assert.assertNull;
 import static org.junit.Assert.assertTrue;
 import static org.junit.Assert.fail;
+import static org.junit.Assume.assumeTrue;
 
 import android.Manifest;
 import android.content.ContentInterface;
@@ -334,9 +335,22 @@ public class MediaProviderTest {
      */
     @Test
     public void testCreateRequest() throws Exception {
-        final Collection<Uri> uris = Arrays.asList(
-                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY, 42));
+        final ContentValues values = new ContentValues();
+        values.put(MediaColumns.DISPLAY_NAME, "test.mp3");
+        values.put(MediaColumns.MIME_TYPE, "audio/mpeg");
+        final Uri uri = sIsolatedResolver.insert(
+                MediaStore.Audio.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY), values);
+        assumeTrue(uri != null);
+        final Collection<Uri> uris = List.of(uri);
         assertNotNull(MediaStore.createWriteRequest(sIsolatedResolver, uris));
+    }
+
+    @Test
+    public void testCreateRequest_invalidUri_throwsException() throws Exception {
+        final Collection<Uri> uris = List.of(
+                MediaStore.Images.Media.getContentUri(MediaStore.VOLUME_EXTERNAL_PRIMARY, 42));
+        assertThrows(IllegalArgumentException.class,
+                () -> MediaStore.createWriteRequest(sIsolatedResolver, uris));
     }
 
     @Test
