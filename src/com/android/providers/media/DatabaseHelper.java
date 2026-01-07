@@ -188,6 +188,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
     private static final int NOTIFY_BATCH_SIZE = 256;
 
     final Context mContext;
+    final MultiUserHelper mMultiUserHelper;
     final String mName;
     final int mVersion;
     final String mVolumeName;
@@ -289,6 +290,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
             DatabaseBackupAndRecovery databaseBackupAndRecovery) {
         super(context, name, null, version);
         mContext = context;
+        mMultiUserHelper = MultiUserHelper.create();
         mName = name;
         mVersion = version;
         if (isInternal()) {
@@ -611,12 +613,46 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
         }
     }
 
+    private void migrateXattrSchemaIfNeeded() {
+        if (UserHandle.myUserId() == 0) {
+            // The xattr schema version is stored as an xattr, but there might be no more space for
+            // new xattrs for user 0 due to AOSP's original design. Skip all xattr versioning for
+            // user 0. Much of the migration logic will just be for moving xattrs to users' own
+            // /data/media/[userId] directories anyway; it's irrelevant for user 0, since everything
+            // was stored in /data/media/0 beforehand anyway.
+            Log.d(TAG, "skipping migrations for system user (user 0)");
+            return;
+        }
+
+        final MultiUserHelper.DbType dbType;
+        if (isInternal()) {
+            dbType = MultiUserHelper.DbType.INTERNAL;
+        } else if (isExternal()) {
+            dbType = MultiUserHelper.DbType.EXTERNAL;
+        } else {
+            Log.d(TAG, "xattr migration only supported for internal/external db");
+            return;
+        }
+
+        long version = mMultiUserHelper.getXattrSchemaVersion(dbType);
+        // Migrations here should check if xattrs have been set beforehand in case it is for a
+        // new user being created.
+
+        mMultiUserHelper.updateXattrSchemaVersion(dbType, version);
+    }
+
     private void tryRecoverDatabase(SQLiteDatabase db, String volumeName) {
         if (!mDatabaseBackupAndRecovery.isStableUrisEnabled(volumeName)) {
             return;
         }
 
         synchronized (sRecoveryLock) {
+            // Migrate before lastUsedSessionIdFromExternalStoragePathXattr is checked below.
+            // The check below uses the new directory paths for xattrs, so we need to migrate xattrs
+            // from the old directory path to new path so that it doesn't detect this wrongly as a
+            // "first time scenario".
+            migrateXattrSchemaIfNeeded();
+
             // Read last used session id from /data/media/0.
             Optional<String> lastUsedSessionIdFromExternalStoragePathXattr = getXattr(
                     getExternalStorageDbXattrPath(), getSessionIdXattrKeyForDatabase());

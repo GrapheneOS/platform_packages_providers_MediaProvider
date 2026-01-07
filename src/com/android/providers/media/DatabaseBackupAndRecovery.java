@@ -970,7 +970,7 @@ public class DatabaseBackupAndRecovery {
     /**
      * Reads long value corresponding to given key from xattr on given path.
      */
-    private static Optional<Long> getXattrOfLongValue(String path, String key) {
+    static Optional<Long> getXattrOfLongValue(String path, String key) {
         try {
             return Optional.of(Long.parseLong(new String(Os.getxattr(path, key))));
         } catch (Exception e) {
