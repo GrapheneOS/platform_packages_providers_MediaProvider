@@ -16,9 +16,9 @@
 
 package com.android.providers.media;
 
+import static com.android.providers.media.DatabaseHelper.DATA_MEDIA_XATTR_DIRECTORY_PATH_OLD;
 import static android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY;
 
-import static com.android.providers.media.DatabaseHelper.DATA_MEDIA_XATTR_DIRECTORY_PATH;
 import static com.android.providers.media.DatabaseHelper.EXTERNAL_DB_NEXT_ROW_ID_XATTR_KEY_PREFIX;
 import static com.android.providers.media.DatabaseHelper.EXTERNAL_DB_SESSION_ID_XATTR_KEY_PREFIX;
 import static com.android.providers.media.DatabaseHelper.INTERNAL_DB_NEXT_ROW_ID_XATTR_KEY_PREFIX;
@@ -1416,16 +1416,19 @@ public class DatabaseBackupAndRecovery {
      * Removes database recovery data for given user id. This is done when a user is removed.
      */
     void removeRecoveryDataForUserId(int removedUserId) {
+        // GrapheneOS: Note that at the moment, this is only called from functions that are
+        // only used in tests (MediaStore.REMOVE_RECOVERY_DATA command) or called during maintenance
+        // mode on demo devices.
         String removeduserIdString = String.valueOf(removedUserId);
-        removeXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH,
+        removeXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH_OLD,
                 INTERNAL_DB_NEXT_ROW_ID_XATTR_KEY_PREFIX.concat(
                         removeduserIdString));
-        removeXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH,
+        removeXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH_OLD,
                 EXTERNAL_DB_NEXT_ROW_ID_XATTR_KEY_PREFIX.concat(
                         removeduserIdString));
-        removeXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH,
+        removeXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH_OLD,
                 INTERNAL_DB_SESSION_ID_XATTR_KEY_PREFIX.concat(removeduserIdString));
-        removeXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH,
+        removeXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH_OLD,
                 EXTERNAL_DB_SESSION_ID_XATTR_KEY_PREFIX.concat(removeduserIdString));
         Log.v(TAG, "Removed recovery data for user id: " + removedUserId);
     }
@@ -1436,7 +1439,15 @@ public class DatabaseBackupAndRecovery {
      * This is done during an idle maintenance.
      */
     void removeRecoveryDataExceptValidUsers(List<String> validUsers) {
-        List<String> xattrList = listXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH);
+        // If we revert back to storing it under /data/media/[parentUserId] for profiles, this path
+        // could be changed to the per-user path. However, this recovery data removal code doesn't
+        // run currently on production devices.
+        //
+        // GrapheneOS xattr schema version 1: Removing recovery data for users other than userId 0
+        // is already handled by removal of the /data/media/[userId] directory, since all the xattrs
+        // are stored there now. This test-only method was only relevant for previous design of
+        // storing all xattrs for all users under /data/media/0 directory.
+        List<String> xattrList = listXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH_OLD);
         Log.i(TAG, "Xattr list is " + xattrList);
         if (xattrList.isEmpty()) {
             return;

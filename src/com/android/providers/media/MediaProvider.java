@@ -381,6 +381,8 @@ import java.util.Map;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.Set;
+import java.util.SortedSet;
+import java.util.TreeSet;
 import java.util.UUID;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutionException;
@@ -8586,14 +8588,37 @@ public class MediaProvider extends ContentProvider {
                 "Permission missing to call GET_RECOVERY_DATA by "
                         + "uid:" + Binder.getCallingUid());
 
+        /*
+        GrapheneOS: xattrs are now set in separate /data/media/[userId]. Need to traverse users.
+        This code isn't that important at the moment, as it's meant to be called from tests.
+
+        Old AOSP code for when everything is stored in /data/media/0:
+
         String[] xattrs = null;
         try {
            xattrs = Os.listxattr("/data/media/0");
         } catch (ErrnoException e) {
             Log.w(TAG, "Error in getting xattr list ", e);
         }
+         */
+
+        List<String> validUsers = mUserManager.getUserHandles(/* excludeDying */ true).stream()
+                .map(userHandle -> String.valueOf(userHandle.getIdentifier()))
+                .toList();
+
+        var allXAttrs = new TreeSet<String>();
+        for (String validUserId : validUsers) {
+            Log.d(TAG, "adding xattrs from user " + validUserId);
+            try {
+                String[] xattrsForUser = Os.listxattr("/data/media/" + validUserId);
+                allXAttrs.addAll(Arrays.asList(xattrsForUser));
+            } catch (ErrnoException e) {
+                Log.w(TAG, "Error in getting xattr list for user " + validUserId, e);
+            }
+        }
 
         Bundle bundle = new Bundle();
+        String[] xattrs = allXAttrs.toArray(String[]::new);
         bundle.putStringArray(MediaStore.GET_RECOVERY_DATA, xattrs);
         return bundle;
     }

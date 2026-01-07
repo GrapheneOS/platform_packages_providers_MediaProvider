@@ -21,9 +21,27 @@ public class MultiUserHelper {
     private static final String EXTERNAL_DB_XATTR_VERSION_KEY = "user.extgosxattrversion".concat(
             String.valueOf(UserHandle.myUserId()));
 
+    /**
+     * A modification of {@link DatabaseHelper#DATA_MEDIA_XATTR_DIRECTORY_PATH_OLD} so that xattrs
+     * are set in specific locations.
+     * For all users (full users, profiles), we generally use /data/user/[userId].
+     */
+    final String mDataMediaXattrDirectoryPathPerUser;
+
     private long mXattrSchemaVersion;
 
-    private MultiUserHelper() {}
+    /**
+     * Do not modify the contents; this is a function for a specific xattr schema. See
+     * {@link DatabaseHelper#migrateXattrKeyVersion0to1IfNeeded}
+     */
+    String getDataMediaXattrDirPathVersion1() {
+        return String.format("/data/media/%s", UserHandle.myUserId());
+    }
+
+    private MultiUserHelper() {
+        mDataMediaXattrDirectoryPathPerUser = getDataMediaXattrDirPathVersion1();
+        Log.d(TAG, "mDataMediaXattrDirectoryPathPerUser " + mDataMediaXattrDirectoryPathPerUser);
+    }
 
     enum DbType {
         INTERNAL, EXTERNAL

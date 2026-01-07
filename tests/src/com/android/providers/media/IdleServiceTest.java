@@ -377,9 +377,14 @@ public class IdleServiceTest {
                             + UserHandle.SYSTEM.getIdentifier());
 
             // Verify presence of recovery data
+            // GrapheneOS: This part of the test is no longer relevant, because xattrs are now
+            // stored in /data/media/[userId]. When a full user is removed, their
+            // /data/media/[userId] directory gets removed, so their xattrs will be gone.
             recoveryData = MediaStore.getRecoveryData(context.getContentResolver());
             assertThat(getUserIdsForUsersFromRecoveryData(recoveryData)).containsAtLeastElementsIn(
-                    Arrays.asList(UserHandle.SYSTEM.getIdentifier(), secondaryUser));
+                    Arrays.asList(UserHandle.SYSTEM.getIdentifier()));
+            // Previously, this was Arrays.asList(UserHandle.SYSTEM.getIdentifier(), secondaryUser)
+            // because AOSP used to expect the attrs to not get removed on non demo users.
         } catch (Exception e) {
             throw new RuntimeException(e);
         } finally {

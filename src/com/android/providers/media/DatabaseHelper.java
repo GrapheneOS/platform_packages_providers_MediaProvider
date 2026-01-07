@@ -17,7 +17,9 @@
 package com.android.providers.media;
 
 import static com.android.providers.media.DatabaseBackupAndRecovery.getXattr;
+import static com.android.providers.media.DatabaseBackupAndRecovery.getXattrRaw;
 import static com.android.providers.media.DatabaseBackupAndRecovery.setXattr;
+import static com.android.providers.media.DatabaseBackupAndRecovery.setXattrRaw;
 import static com.android.providers.media.util.DatabaseUtils.bindList;
 import static com.android.providers.media.util.Logging.LOGV;
 import static com.android.providers.media.util.Logging.TAG;
@@ -172,8 +174,11 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
      * work profiles.
      * For devices with adoptable storage support, opting for adoptable storage will not delete
      * /data/media/0 directory.
+     *
+     * <p>GrapheneOS: Renamed to cause conflicts if new callers access this. This shouldn't be used
+     * for all users. Do not change this string
      */
-    static final String DATA_MEDIA_XATTR_DIRECTORY_PATH = "/data/media/0";
+    static final String DATA_MEDIA_XATTR_DIRECTORY_PATH_OLD = "/data/media/0";
 
     static final String INTERNAL_DATABASE_NAME = "internal.db";
     public static final String EXTERNAL_DATABASE_NAME = "external.db";
@@ -613,14 +618,76 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
         }
     }
 
+    /**
+     * Version 0 to 1: Migrate xattr from /data/media/0 to /data/media/[userId]
+     * @param key Xattr key to migrate
+     */
+    private void migrateXattrKeyVersion0to1IfNeeded(String key) {
+        final String oldPath = "/data/media/0";
+        final String newPath = mMultiUserHelper.getDataMediaXattrDirPathVersion1();
+
+        if (UserHandle.myUserId() == UserHandle.SYSTEM.getIdentifier() || oldPath.equals(newPath)) {
+            // This will skip incorrect migration for user 0
+            Log.d(TAG, "skipping migration of " + key + " for user " + UserHandle.myUserId());
+            return;
+        }
+
+        if (!newPath.equals(getExternalStorageDbXattrPath())) {
+            // getExternalStorageDbXattrPath can be overridden by test functions.
+            // If the test functions point this path to somewhere else, just use that for the test
+            // instead.
+            Log.w(TAG, "skipping migration due to test override; "
+                    + "getExternalStorageDbXattrPath " + getExternalStorageDbXattrPath()
+                    + " != newPath " + newPath);
+            return;
+        }
+
+        // Read raw xattr bytes so that we don't have to worry about the types. All xattrs are
+        // stored using DatabaseBackupAndRecovery#setXattr method, which converts the value to a
+        // string then stores the bytes of that string as the xattr value.
+        final Optional<byte[]> xattrFromNewPath = getXattrRaw(newPath, key);
+        if (xattrFromNewPath.isPresent()) {
+            Log.d(TAG, "xattr " + key + " already in per-user location for user " + UserHandle.myUserId());
+            return;
+        }
+
+        final Optional<byte[]> xattrFromOldPath = getXattrRaw(oldPath, key);
+        if (xattrFromOldPath.isEmpty()) {
+            // Note Missing the session ID in both the new and old paths on external storage
+            // means this is first time scenario.
+
+            // sessionIds and row IDs are backed up together; we should not expect row ID to be
+            // there if session ID is not there. Upstream code interprets missing session ID to
+            // be first time scenario. Thus we can just return here.
+            Log.d(TAG, "first time scenario: " + key + " missing in both "
+                    + "new " + newPath + ", and old " + oldPath);
+            return;
+        }
+
+        final String valueToLog = new String(xattrFromOldPath.get());
+        Log.d(TAG, "migrating xattr " + key + "(value " + valueToLog + ") to per-user dir " + newPath);
+        boolean newPathSuccess = setXattrRaw(newPath, key, xattrFromOldPath.get(), valueToLog);
+        if (!newPathSuccess) {
+            Log.e(TAG, "failed to migrate " + key + " to new " + newPath);
+            return;
+        }
+
+        // It's uncertain if removeXattr still has bugs in the kernel. Note that AOSP has not
+        // reimplemented the xattr cleanup system that uses removexattr.
+        // Log.d(tag, "removing " + key + " from old dir " + oldPath);
+        // removeXattr(oldPath,  key);
+
+        Log.d(TAG, "finished migrating " + key + " to per-user dir " + newPath);
+    }
+
     private void migrateXattrSchemaIfNeeded() {
-        if (UserHandle.myUserId() == 0) {
+        if (UserHandle.myUserId() == UserHandle.SYSTEM.getIdentifier()) {
             // The xattr schema version is stored as an xattr, but there might be no more space for
             // new xattrs for user 0 due to AOSP's original design. Skip all xattr versioning for
             // user 0. Much of the migration logic will just be for moving xattrs to users' own
             // /data/media/[userId] directories anyway; it's irrelevant for user 0, since everything
             // was stored in /data/media/0 beforehand anyway.
-            Log.d(TAG, "skipping migrations for system user (user 0)");
+            Log.d(TAG, "skipping xattr migrations for system user (user 0)");
             return;
         }
 
@@ -638,6 +705,20 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
         // Migrations here should check if xattrs have been set beforehand in case it is for a
         // new user being created.
 
+        // Version 1: This is a change to store xattrs in per-user directories /data/media/[userId]
+        // instead of /data/media/0. The original AOSP design of storing all xattrs in /data/media/0
+        // for all users will reach the limit on number of xattrs when there are a large number of
+        // users (>= 22 users).
+        //
+        // Note: From previous commit messages in AOSP, this old design needs more work for adoptable
+        // storage. We don't currently support adoptable storage.
+        if (version < 1) {
+            Log.d(TAG, "migrating xattr schema to version 1");
+            version = 1;
+            migrateXattrKeyVersion0to1IfNeeded(getSessionIdXattrKeyForDatabase());
+            migrateXattrKeyVersion0to1IfNeeded(getNextRowIdXattrKeyForDatabase());
+        }
+
         mMultiUserHelper.updateXattrSchemaVersion(dbType, version);
     }
 
@@ -654,6 +735,8 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
             migrateXattrSchemaIfNeeded();
 
             // Read last used session id from /data/media/0.
+            // GrapheneOS: This now reads from mMultiUserHelper.mDataMediaXattrDirectoryPathPerUser,
+            // which is /data/media/[userId] for xattr schema version 1.
             Optional<String> lastUsedSessionIdFromExternalStoragePathXattr = getXattr(
                     getExternalStorageDbXattrPath(), getSessionIdXattrKeyForDatabase());
             if (!lastUsedSessionIdFromExternalStoragePathXattr.isPresent()) {
@@ -702,7 +785,8 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
     }
 
     protected String getExternalStorageDbXattrPath() {
-        return DATA_MEDIA_XATTR_DIRECTORY_PATH;
+        // Modified to be per user
+        return mMultiUserHelper.mDataMediaXattrDirectoryPathPerUser;
     }
 
     private void tryRecoverRowIdSequence(SQLiteDatabase db) {
@@ -1424,7 +1508,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
                 FileColumns._ID,
                 FileColumns.DATA,
                 MediaColumns.MIME_TYPE,
-                MediaStore.Audio.PlaylistsColumns.NAME,
+                Audio.PlaylistsColumns.NAME,
         };
         final Uri queryUri = MediaStore
                 .rewriteToLegacy(MediaStore.Files.getContentUri(mVolumeName));
@@ -1462,7 +1546,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
                 parentFile = new File(parentFile.getParentFile(), Environment.DIRECTORY_MUSIC);
             }
             final String playlistName = cursor.getString(
-                    cursor.getColumnIndex(MediaStore.Audio.PlaylistsColumns.NAME));
+                    cursor.getColumnIndex(Audio.PlaylistsColumns.NAME));
 
             try {
                 // Build playlist file path with a file extension that matches
@@ -1475,7 +1559,7 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
 
             final long rowId = cursor.getLong(cursor.getColumnIndex(FileColumns._ID));
             final Uri playlistMemberUri = MediaStore.rewriteToLegacy(
-                    MediaStore.Audio.Playlists.Members.getContentUri(mVolumeName, rowId));
+                    Audio.Playlists.Members.getContentUri(mVolumeName, rowId));
             createPlaylistFile(client, playlistMemberUri, playlistFile);
             return playlistFile.getAbsolutePath();
         } catch (RemoteException e) {
@@ -1489,8 +1573,8 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
     private void createPlaylistFile(ContentProviderClient client, @NonNull Uri playlistMemberUri,
             @NonNull File playlistFile) throws IllegalStateException {
         final String[] projection = new String[] {
-                MediaStore.Audio.Playlists.Members.AUDIO_ID,
-                MediaStore.Audio.Playlists.Members.PLAY_ORDER,
+                Audio.Playlists.Members.AUDIO_ID,
+                Audio.Playlists.Members.PLAY_ORDER,
         };
 
         final Playlist playlist = new Playlist();
@@ -1553,30 +1637,30 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
     private static final ArraySet<String> sMigrateColumns = new ArraySet<>();
 
     {
-        sMigrateColumns.add(MediaStore.MediaColumns._ID);
-        sMigrateColumns.add(MediaStore.MediaColumns.DATA);
-        sMigrateColumns.add(MediaStore.MediaColumns.VOLUME_NAME);
-        sMigrateColumns.add(MediaStore.Files.FileColumns.MEDIA_TYPE);
+        sMigrateColumns.add(MediaColumns._ID);
+        sMigrateColumns.add(MediaColumns.DATA);
+        sMigrateColumns.add(MediaColumns.VOLUME_NAME);
+        sMigrateColumns.add(FileColumns.MEDIA_TYPE);
 
-        sMigrateColumns.add(MediaStore.MediaColumns.DATE_ADDED);
-        sMigrateColumns.add(MediaStore.MediaColumns.DATE_EXPIRES);
-        sMigrateColumns.add(MediaStore.MediaColumns.IS_PENDING);
-        sMigrateColumns.add(MediaStore.MediaColumns.IS_TRASHED);
-        sMigrateColumns.add(MediaStore.MediaColumns.IS_FAVORITE);
-        sMigrateColumns.add(MediaStore.MediaColumns.OWNER_PACKAGE_NAME);
+        sMigrateColumns.add(MediaColumns.DATE_ADDED);
+        sMigrateColumns.add(MediaColumns.DATE_EXPIRES);
+        sMigrateColumns.add(MediaColumns.IS_PENDING);
+        sMigrateColumns.add(MediaColumns.IS_TRASHED);
+        sMigrateColumns.add(MediaColumns.IS_FAVORITE);
+        sMigrateColumns.add(MediaColumns.OWNER_PACKAGE_NAME);
 
-        sMigrateColumns.add(MediaStore.MediaColumns.ORIENTATION);
-        sMigrateColumns.add(MediaStore.Files.FileColumns.PARENT);
+        sMigrateColumns.add(MediaColumns.ORIENTATION);
+        sMigrateColumns.add(FileColumns.PARENT);
 
-        sMigrateColumns.add(MediaStore.Audio.AudioColumns.BOOKMARK);
+        sMigrateColumns.add(Audio.AudioColumns.BOOKMARK);
 
-        sMigrateColumns.add(MediaStore.Video.VideoColumns.TAGS);
-        sMigrateColumns.add(MediaStore.Video.VideoColumns.CATEGORY);
-        sMigrateColumns.add(MediaStore.Video.VideoColumns.BOOKMARK);
+        sMigrateColumns.add(Video.VideoColumns.TAGS);
+        sMigrateColumns.add(Video.VideoColumns.CATEGORY);
+        sMigrateColumns.add(Video.VideoColumns.BOOKMARK);
 
         // This also migrates MediaStore.Images.ImageColumns.IS_PRIVATE
         // as they both have the same value "isprivate".
-        sMigrateColumns.add(MediaStore.Video.VideoColumns.IS_PRIVATE);
+        sMigrateColumns.add(Video.VideoColumns.IS_PRIVATE);
 
         sMigrateColumns.add(MediaStore.DownloadColumns.DOWNLOAD_URI);
         sMigrateColumns.add(MediaStore.DownloadColumns.REFERER_URI);
@@ -2582,20 +2666,20 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
      */
     protected void backupNextRowId(long nextRowId) {
         long backupId = nextRowId + getNextRowIdBackupFrequency();
-        boolean setOnExternalStorage = setXattr(DATA_MEDIA_XATTR_DIRECTORY_PATH,
+        boolean setOnExternalStorage = setXattr(mMultiUserHelper.mDataMediaXattrDirectoryPathPerUser,
                 getNextRowIdXattrKeyForDatabase(),
                 String.valueOf(backupId));
         if (setOnExternalStorage) {
             mNextRowIdBackup.set(backupId);
             Log.i(TAG, String.format(Locale.ROOT, "Backed up next row id as:%d on path:%s for %s.",
-                    backupId, DATA_MEDIA_XATTR_DIRECTORY_PATH, mName));
+                    backupId, mMultiUserHelper.mDataMediaXattrDirectoryPathPerUser, mName));
         }
     }
 
     protected Optional<Long> getNextRowIdFromXattr() {
         try {
             return Optional.of(Long.parseLong(new String(
-                    Os.getxattr(DATA_MEDIA_XATTR_DIRECTORY_PATH,
+                    Os.getxattr(mMultiUserHelper.mDataMediaXattrDirectoryPathPerUser,
                             getNextRowIdXattrKeyForDatabase()))));
         } catch (Exception e) {
             Log.e(TAG, String.format(Locale.ROOT, "Xattr:%s not found on external storage: %s",
@@ -2646,10 +2730,10 @@ public class DatabaseHelper extends SQLiteOpenHelper implements AutoCloseable {
             return false;
         }
 
-        if (!(new File(DATA_MEDIA_XATTR_DIRECTORY_PATH)).exists()) {
+        if (!(new File(mMultiUserHelper.mDataMediaXattrDirectoryPathPerUser)).exists()) {
             Log.w(TAG, String.format(Locale.ROOT,
                     "Skipping row id recovery as path:%s does not exist.",
-                    DATA_MEDIA_XATTR_DIRECTORY_PATH));
+                    mMultiUserHelper.mDataMediaXattrDirectoryPathPerUser));
             return false;
         }
 
