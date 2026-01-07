@@ -957,6 +957,16 @@ public class DatabaseBackupAndRecovery {
         }
     }
 
+    static Optional<byte[]> getXattrRaw(String path, String key) {
+        try {
+            return Optional.of(Os.getxattr(path, key));
+        } catch (Exception e) {
+            Log.w(TAG, String.format(Locale.ROOT,
+                    "Exception encountered while reading xattr:%s from path:%s.", key, path), e);
+            return Optional.empty();
+        }
+    }
+
     /**
      * Reads long value corresponding to given key from xattr on given path.
      */
@@ -987,16 +997,23 @@ public class DatabaseBackupAndRecovery {
      * Sets key and value as xattr on given path.
      */
     static boolean setXattr(String path, String key, String value) {
+        return setXattrRaw(path, key, value.getBytes(), value);
+    }
+
+    /**
+     * Sets key and value as xattr on given path.
+     */
+    static boolean setXattrRaw(String path, String key, byte[] valueBytes, String valueToLog) {
         try (ParcelFileDescriptor pfd = ParcelFileDescriptor.open(new File(path),
                 ParcelFileDescriptor.MODE_READ_ONLY)) {
             // Map id value to xattr key
-            Os.setxattr(path, key, value.getBytes(), 0);
+            Os.setxattr(path, key, valueBytes, 0);
             Os.fsync(pfd.getFileDescriptor());
-            Log.d(TAG, String.format("xattr set to %s for key:%s on path: %s.", value, key, path));
+            Log.d(TAG, String.format("xattr set to %s for key:%s on path: %s.", valueToLog, key, path));
             return true;
         } catch (Exception e) {
             Log.e(TAG, String.format(Locale.ROOT, "Failed to set xattr:%s to %s for path: %s.", key,
-                    value, path), e);
+                    valueToLog, path), e);
             return false;
         }
     }
