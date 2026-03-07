@@ -88,6 +88,7 @@ class LocalUriMatcher {
     public static final int PICKER_INTERNAL_V2 = 908;
 
     public static final int MEDIA_GRANTS = 1000;
+    static final int MIC_SPOOFING_SOURCE = 1001;
 
     // MediaProvider Command Line Interface
     static final int CLI = 100_000;
@@ -153,6 +154,7 @@ class LocalUriMatcher {
         mPublic.addURI(auth, "picker_transcoded/#/*/media/*", PICKER_TRANSCODED_ID);
 
         mPublic.addURI(auth, "cli", CLI);
+        mPublic.addURI(auth, "mic_spoofing_source", MIC_SPOOFING_SOURCE);
 
         mPublic.addURI(auth, "*/images/media", IMAGES_MEDIA);
         mPublic.addURI(auth, "*/images/media/#", IMAGES_MEDIA_ID);

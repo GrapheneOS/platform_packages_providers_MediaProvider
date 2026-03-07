@@ -126,6 +126,7 @@ import static com.android.providers.media.LocalUriMatcher.IMAGES_THUMBNAILS;
 import static com.android.providers.media.LocalUriMatcher.IMAGES_THUMBNAILS_ID;
 import static com.android.providers.media.LocalUriMatcher.MEDIA_GRANTS;
 import static com.android.providers.media.LocalUriMatcher.MEDIA_SCANNER;
+import static com.android.providers.media.LocalUriMatcher.MIC_SPOOFING_SOURCE;
 import static com.android.providers.media.LocalUriMatcher.PICKER_GET_CONTENT_ID;
 import static com.android.providers.media.LocalUriMatcher.PICKER_ID;
 import static com.android.providers.media.LocalUriMatcher.PICKER_INTERNAL_V2;
@@ -232,6 +233,7 @@ import android.database.Cursor;
 import android.database.MatrixCursor;
 import android.database.sqlite.SQLiteConstraintException;
 import android.database.sqlite.SQLiteDatabase;
+import android.ext.micspoofing.MicSpoofingApi;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.drawable.Icon;
@@ -10230,6 +10232,35 @@ public class MediaProvider extends ContentProvider {
         }
     }
 
+    private ParcelFileDescriptor openMicSpoofingSourceFile(String mode)
+            throws FileNotFoundException {
+        if (!"r".equals(mode)) {
+            throw new SecurityException("Mic spoofing source is read-only");
+        }
+
+        LocalCallingIdentity callingIdentity = mCallingIdentity.get();
+        String packageName = callingIdentity.getPackageName();
+        int userId = callingIdentity.getUser().getIdentifier();
+        String path = MicSpoofingApi.getCustomAudioPathForApp(packageName, userId);
+        if (path == null) {
+            throw new FileNotFoundException("No custom mic spoofing source configured for "
+                    + packageName + " userId " + userId);
+        }
+
+        final CallingIdentity providerToken = clearCallingIdentity();
+        try {
+            return ParcelFileDescriptor.open(new File(path), ParcelFileDescriptor.MODE_READ_ONLY);
+        } catch (IOException e) {
+            FileNotFoundException exception = new FileNotFoundException(
+                    "Unable to open mic spoofing source for " + packageName + " userId "
+                            + userId + ": " + path);
+            exception.initCause(e);
+            throw exception;
+        } finally {
+            restoreCallingIdentity(providerToken);
+        }
+    }
+
     private ParcelFileDescriptor openFileCommon(Uri uri, String mode, CancellationSignal signal,
             @Nullable Bundle opts)
             throws FileNotFoundException {
@@ -10261,6 +10292,9 @@ public class MediaProvider extends ContentProvider {
 
         final boolean allowHidden = isCallingPackageAllowedHidden();
         final int match = matchUri(uri, allowHidden);
+        if (match == MIC_SPOOFING_SOURCE) {
+            return openMicSpoofingSourceFile(mode);
+        }
         final String volumeName = getVolumeName(uri);
 
         // Handle some legacy cases where we need to redirect thumbnails
