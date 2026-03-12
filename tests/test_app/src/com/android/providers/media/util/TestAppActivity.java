@@ -17,15 +17,29 @@
 package com.android.providers.media.util;
 
 import static com.android.providers.media.util.TestUtils.QUERY_TYPE;
+import static com.android.providers.media.util.TestUtils.RESULT_KEY_EXCEPTION_CLASS_NAME;
+import static com.android.providers.media.util.TestUtils.RESULT_KEY_EXCEPTION_MESSAGE;
+import static com.android.providers.media.util.TestUtils.RESULT_KEY_OPEN_SUCCEEDED;
+import static com.android.providers.media.util.TestUtils.OPEN_MIC_SPOOFING_SOURCE;
 import static com.android.providers.media.util.TestUtils.RUN_INFINITE_ACTIVITY;
 
 import android.app.Activity;
+import android.content.Intent;
+import android.net.Uri;
 import android.os.Bundle;
+import android.os.ParcelFileDescriptor;
+
+import java.io.IOException;
 
 
 public class TestAppActivity extends Activity {
+    private static final Uri MIC_SPOOFING_OPEN_SOURCE_URI =
+            Uri.parse("content://media/mic_spoofing_source");
+
     @Override
     public void onCreate(Bundle savedInstanceState) {
+        super.onCreate(savedInstanceState);
+
         String queryType = getIntent().getStringExtra(QUERY_TYPE);
         queryType = queryType == null ? "null" : queryType;
 
@@ -33,9 +47,27 @@ public class TestAppActivity extends Activity {
             case RUN_INFINITE_ACTIVITY:
                 while (true) {
                 }
+            case OPEN_MIC_SPOOFING_SOURCE:
+                openMicSpoofingSourceForResult();
+                return;
             default:
                 throw new IllegalStateException(
                         "Unknown query received from launcher app: " + queryType);
         }
+    }
+
+    private void openMicSpoofingSourceForResult() {
+        Intent result = new Intent();
+        try (ParcelFileDescriptor parcelFileDescriptor = getContentResolver().openFileDescriptor(
+                MIC_SPOOFING_OPEN_SOURCE_URI, "r")) {
+            result.putExtra(RESULT_KEY_OPEN_SUCCEEDED, parcelFileDescriptor != null);
+        } catch (IOException | SecurityException e) {
+            result.putExtra(RESULT_KEY_OPEN_SUCCEEDED, false);
+            result.putExtra(RESULT_KEY_EXCEPTION_CLASS_NAME, e.getClass().getName());
+            result.putExtra(RESULT_KEY_EXCEPTION_MESSAGE, e.getMessage());
+        }
+
+        setResult(Activity.RESULT_OK, result);
+        finish();
     }
 }

@@ -30,6 +30,14 @@ public class TestUtils {
     public static final String QUERY_TYPE = "com.android.providers.media.util.QUERY_TYPE";
     public static final String RUN_INFINITE_ACTIVITY =
             "com.android.providers.media.util.RUN_INFINITE_ACTIVITY";
+    public static final String OPEN_MIC_SPOOFING_SOURCE =
+            "com.android.providers.media.util.OPEN_MIC_SPOOFING_SOURCE";
+    public static final String RESULT_KEY_OPEN_SUCCEEDED =
+            "com.android.providers.media.util.RESULT_KEY_OPEN_SUCCEEDED";
+    public static final String RESULT_KEY_EXCEPTION_CLASS_NAME =
+            "com.android.providers.media.util.RESULT_KEY_EXCEPTION_CLASS_NAME";
+    public static final String RESULT_KEY_EXCEPTION_MESSAGE =
+            "com.android.providers.media.util.RESULT_KEY_EXCEPTION_MESSAGE";
 
     private static final long POLLING_TIMEOUT_MILLIS = TimeUnit.SECONDS.toMillis(20);
     private static final long POLLING_SLEEP_MILLIS = 100;
