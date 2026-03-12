@@ -232,6 +232,10 @@ public final class MediaStore {
     public static final String GET_DOCUMENT_URI_CALL = "get_document_uri";
     /** @hide */
     public static final String GET_MEDIA_URI_CALL = "get_media_uri";
+    /** @hide */
+    public static final String REVOKE_URI_PERMISSION_CALL = "revoke_uri_permission";
+    /** @hide */
+    public static final String EXTRA_OLD_PATH = "old_path";
 
     /** @hide */
     public static final String ENSURE_PROVIDERS_CALL = "ensure_providers_call";
