@@ -136,8 +136,9 @@ public final class XmpDataParser implements Closeable {
             } else if (NS_XMPMM.equals(ns)
                     && NAME_ORIGINAL_DOCUMENT_ID.equals(name)) {
                 builder.originalDocumentId(mParser.nextText());
-            } else if (NS_EXIF.equals(ns) && RedactionUtils.getsRedactedExifTags()
-                    .contains(name)) {
+            }
+
+            if (isSensitiveTagOrAttribute()) {
                 long start = offset;
                 do {
                     type = mParser.next();
@@ -194,8 +195,8 @@ public final class XmpDataParser implements Closeable {
             // attributes or tags, so we're willing to look for both
             final String ns = mParser.getNamespace();
             final String name = mParser.getName();
-            if (NS_EXIF.equals(ns) && RedactionUtils.getsRedactedExifTags()
-                    .contains(name)) {
+
+            if (isSensitiveTagOrAttribute()) {
                 long start = offset;
                 do {
                     type = mParser.next();
@@ -208,6 +209,22 @@ public final class XmpDataParser implements Closeable {
             }
         }
         return redactedRanges;
+    }
+
+    private boolean isSensitiveTagOrAttribute() {
+        if (NS_EXIF.equals(mParser.getNamespace()) && RedactionUtils.getsRedactedExifTags()
+                .contains(mParser.getName())) {
+            return true;
+        }
+        for (int i = 0; i < mParser.getAttributeCount(); i++) {
+            final String attrNs = mParser.getAttributeNamespace(i);
+            final String attrName = mParser.getAttributeName(i);
+            if (NS_EXIF.equals(attrNs)
+                    && RedactionUtils.getsRedactedExifTags().contains(attrName)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private static class XmpData {

@@ -171,6 +171,18 @@ public class XmpDataParserTest {
     }
 
     @Test
+    public void testRedactXmp_RemovesExifGpsAttributes() throws Exception {
+        final File file = stageMp4File(R.raw.gps_test_xmp);
+        final IsoInterface mp4 = IsoInterface.fromFile(file);
+
+        XmpInterface xmpInterface = XmpDataParser.createXmpInterface(mp4);
+        final String redactedXmp = new String(xmpInterface.getRedactedXmp());
+
+        assertThat(redactedXmp).doesNotContain("exif:GPSLatitude");
+        assertThat(redactedXmp).doesNotContain("exif:GPSLongitude");
+    }
+
+    @Test
     public void testStream_LineOffsets() throws Exception {
         final String xml =
                 "<a:b xmlns:a='a' xmlns:c='c' c:d=''\n  c:f='g'>\n  <c:i>j</c:i>\n  </a:b>";
