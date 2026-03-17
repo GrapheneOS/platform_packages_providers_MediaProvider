@@ -32,12 +32,10 @@ import java.io.FileDescriptor;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.nio.ByteOrder;
-import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.Objects;
-import java.util.Queue;
 import java.util.UUID;
 
 /**
@@ -230,6 +228,7 @@ public class IsoInterface {
             case BOX_META:
             case BOX_HDLR:
             case BOX_XYZ:
+            case BOX_XMP:
             case BOX_LOCI:
             case BOX_GPS:
             case BOX_GPS0:
