@@ -2347,8 +2347,8 @@ public class MediaProviderTest {
             File file = stage(R.raw.lg_g4_iso_800_jpg, new File(downloads, testFileName));
             Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
 
-            try (Cursor cursor = sContentResolver.query(testFileUri, projection, null, null,
-                    null)) {
+            try (Cursor cursor = sContentResolver.query(testFileUri, projection,
+                    /* selection */ null, /* selectionArgs */ null, /* sortOrder */null)) {
                 assertNotNull(cursor);
                 int nameIndex = cursor.getColumnIndex(ImageColumns.DISPLAY_NAME);
                 int latitudeIndex = cursor.getColumnIndex(ImageColumns.LATITUDE);
@@ -2372,26 +2372,33 @@ public class MediaProviderTest {
     @RequiresFlagsEnabled(Flags.FLAG_INDEX_MEDIA_LATITUDE_LONGITUDE)
     public void testQueryingMediaGeolocationDataInSelectionShouldReturnEmptyCursor()
             throws Exception {
-        final File downloads = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS);
-        File file = stage(R.raw.lg_g4_iso_800_jpg,
-                new File(downloads, "test" + System.nanoTime() + ".jpg"));
-        Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
-
         String[] projection = new String[] {
                 ImageColumns._ID,
                 ImageColumns.DISPLAY_NAME
         };
-        String selection = ImageColumns.LATITUDE + " = ?";
-        String[] selectionArgs = new String[] { "67.8" };
-        try (Cursor cursor = sContentResolver.query(testFileUri, projection, selection,
-                selectionArgs, null)) {
-            assertNotNull(cursor);
-            // Should no return any results
-            assertThat(cursor.getCount()).isEqualTo(0);
-        } finally {
-            // Clean up
-            file.delete();
+
+        String[] selection = new String[]{
+                ImageColumns.LATITUDE + "=? OR " + ImageColumns.LONGITUDE + "=?",
+                "LATITUDE=? OR LONGITUDE=?"};
+
+        String[] selectionArgs = new String[]{"67.8", "67.8"};
+
+        for (String selectionClause : selection) {
+            final File downloads = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS);
+            File file = stage(R.raw.lg_g4_iso_800_jpg,
+                    new File(downloads, "test" + System.nanoTime() + ".jpg"));
+            Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
+
+            try (Cursor cursor = sContentResolver.query(testFileUri, projection, selectionClause,
+                    selectionArgs, /* sortOrder */ null)) {
+                assertNotNull(cursor);
+                // Should not return any results
+                assertThat(cursor.getCount()).isEqualTo(0);
+            } finally {
+                // Clean-up
+                file.delete();
+            }
         }
     }
 
@@ -2399,28 +2406,33 @@ public class MediaProviderTest {
     @RequiresFlagsEnabled(Flags.FLAG_INDEX_MEDIA_LATITUDE_LONGITUDE)
     public void testQueryingMediaGeolocationDataInOrderByShouldReturnNonEmptyCursor()
             throws Exception {
-        String testFileName = "test" + System.nanoTime() + ".jpg";
-        final File downloads = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS);
-        File file = stage(R.raw.lg_g4_iso_800_jpg, new File(downloads, testFileName));
-        Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
-
         String[] projection = new String[] {
                 ImageColumns._ID,
                 ImageColumns.DISPLAY_NAME
         };
-        try (Cursor cursor = sContentResolver.query(testFileUri, projection, null, null,
-                ImageColumns.LONGITUDE);) {
-            assertNotNull(cursor);
-            // Should return non-empty results
-            assertThat(cursor.getCount()).isEqualTo(1);
-            int nameIndex = cursor.getColumnIndex(ImageColumns.DISPLAY_NAME);
-            cursor.moveToFirst();
-            // Assert name column accessed is non-null and valid
-            assertTrue(cursor.getString(nameIndex).contains(testFileName));
-        } finally {
-            // Clean up
-            file.delete();
+        String[] sortOrders = new String[]{
+                ImageColumns.LATITUDE, ImageColumns.LONGITUDE, "LATITUDE", "LONGITUDE"};
+
+        for (String sortOrder : sortOrders) {
+            String testFileName = "test" + System.nanoTime() + ".jpg";
+            final File downloads = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS);
+            File file = stage(R.raw.lg_g4_iso_800_jpg, new File(downloads, testFileName));
+            Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
+
+            try (Cursor cursor = sContentResolver.query(testFileUri, projection,
+                    /* selection */ null, /* selectionArgs */ null, /* sortOrder */ sortOrder)) {
+                assertNotNull(cursor);
+                // Should return non-empty results even if sorting by restricted column
+                assertThat(cursor.getCount()).isEqualTo(1);
+                int nameIndex = cursor.getColumnIndex(ImageColumns.DISPLAY_NAME);
+                cursor.moveToFirst();
+                // Assert name column accessed is non-null and valid
+                assertTrue(cursor.getString(nameIndex).contains(testFileName));
+            } finally {
+                // Clean up
+                file.delete();
+            }
         }
     }
 
@@ -2428,26 +2440,33 @@ public class MediaProviderTest {
     @RequiresFlagsEnabled(Flags.FLAG_INDEX_MEDIA_LATITUDE_LONGITUDE)
     public void testQueryingMediaGeolocationDataInGroupByAndHavingShouldReturnEmptyCursor()
             throws Exception {
-        String testFileName = "test" + System.nanoTime() + ".jpg";
-        final File downloads = Environment.getExternalStoragePublicDirectory(
-                Environment.DIRECTORY_DOWNLOADS);
-        File file = stage(R.raw.lg_g4_iso_800_jpg, new File(downloads, testFileName));
-        Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
-
         String[] projection = new String[] {
                 ImageColumns._ID,
                 ImageColumns.DISPLAY_NAME
         };
-        Bundle queryArgs = new Bundle();
-        queryArgs.putString(QUERY_ARG_SQL_GROUP_BY, ImageColumns.LATITUDE);
-        queryArgs.putString(QUERY_ARG_SQL_HAVING, ImageColumns.LONGITUDE + " > 100");
-        try (Cursor cursor = sContentResolver.query(testFileUri, projection, queryArgs, null);) {
-            assertNotNull(cursor);
-            // Should not return any results
-            assertThat(cursor.getCount()).isEqualTo(0);
-        } finally {
-            // Clean up
-            file.delete();
+        String[] columnNames =
+                new String[]{ImageColumns.LATITUDE, ImageColumns.LONGITUDE, "LATITUDE",
+                        "LONGITUDE"};
+
+        for (String column : columnNames) {
+            String testFileName = "test" + System.nanoTime() + ".jpg";
+            final File downloads = Environment.getExternalStoragePublicDirectory(
+                    Environment.DIRECTORY_DOWNLOADS);
+            File file = stage(R.raw.lg_g4_iso_800_jpg, new File(downloads, testFileName));
+            Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
+
+            Bundle queryArgs = new Bundle();
+            queryArgs.putString(QUERY_ARG_SQL_GROUP_BY, column);
+            queryArgs.putString(QUERY_ARG_SQL_HAVING, column + " > 100");
+            try (Cursor cursor = sContentResolver.query(testFileUri, projection, queryArgs,
+                    /* cancellationSignal */ null)) {
+                assertNotNull(cursor);
+                // Should not return any results for non-self caller
+                assertThat(cursor.getCount()).isEqualTo(0);
+            } finally {
+                // Clean up
+                file.delete();
+            }
         }
     }
 
