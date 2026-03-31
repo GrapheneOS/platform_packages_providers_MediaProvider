@@ -7027,29 +7027,44 @@ public class MediaProvider extends ContentProvider {
             appendWhereStandalone(qb, ownerPackageMatchClause);
         }
 
-        // Prevent a query from returning results if the selection clauses query on latitude and
-        // longitude. Only return results if these columns are present in the sort clause to avoid
-        // breaking any existing usage but return them in any arbitrary fashion instead of actually
-        // sorting them.
+        filterGeolocationClauses(qb, extras, type);
+
+        return qb;
+    }
+
+    /**
+     * Prevent a query from returning results if the selection clauses query on latitude and
+     * longitude. Only return results if these columns are present in the sort clause to avoid
+     * breaking any existing usage but return them in any arbitrary fashion instead of actually
+     * sorting them.
+     */
+    private void filterGeolocationClauses(@NonNull SQLiteQueryBuilder qb, @NonNull Bundle extras,
+            int type) {
+        if (!indexMediaLatitudeLongitude() || isCallingPackageSelf()) {
+                return;
+        }
+
         List<String> filterClauses = getClausesForFilteringGeolocationData(extras, type);
-        if (indexMediaLatitudeLongitude() && !isCallingPackageSelf() && !filterClauses.isEmpty()) {
-            if (filterClauses.contains(QUERY_ARG_SQL_SORT_ORDER)) {
-                String sortArgs = extras.getString(QUERY_ARG_SQL_SORT_ORDER);
-                if (sortArgs != null) {
-                    if (sortArgs.contains(LATITUDE)) {
-                        sortArgs = sortArgs.replace(LATITUDE, /* replacement */ "NULL");
-                    }
-                    if (sortArgs.contains(LONGITUDE)) {
-                        sortArgs = sortArgs.replace(LONGITUDE, /* replacement */ "NULL");
-                    }
-                    extras.putString(QUERY_ARG_SQL_SORT_ORDER, sortArgs);
-                }
-            } else {
-                final String geolocationClause = "FALSE";
-                appendWhereStandalone(qb, geolocationClause);
+
+        if (filterClauses.isEmpty()) {
+                return;
+        }
+
+        if (filterClauses.contains(QUERY_ARG_SQL_SELECTION) || filterClauses.contains(
+                QUERY_ARG_SQL_HAVING) || filterClauses.contains(QUERY_ARG_SQL_GROUP_BY)) {
+            // Don't return any results if the location metadata columns are queried in the
+            // selection clauses
+            final String geolocationClause = "FALSE";
+            appendWhereStandalone(qb, geolocationClause);
+        } else if (filterClauses.contains(QUERY_ARG_SQL_SORT_ORDER)) {
+            // Do not sort query results if the sort clause includes location metadata columns
+            String sortArgs = extras.getString(QUERY_ARG_SQL_SORT_ORDER);
+            if (sortArgs != null) {
+                sortArgs = sortArgs.replaceAll("(?i)\\b" + LATITUDE + "\\b", "NULL");
+                sortArgs = sortArgs.replaceAll("(?i)\\b" + LONGITUDE + "\\b", "NULL");
+                extras.putString(QUERY_ARG_SQL_SORT_ORDER, sortArgs);
             }
         }
-        return qb;
     }
 
     private List<String> getClausesForFilteringGeolocationData(
