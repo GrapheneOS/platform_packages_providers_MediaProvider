@@ -2515,6 +2515,109 @@ public class MediaProviderTest {
     }
 
     @Test
+    public void testPendingUpdate_SquatterRowDeleted() throws Exception {
+        final String displayName = "test_race_condition_" + System.nanoTime() + ".jpg";
+        final Uri imagesUri = MediaStore.Images.Media.getContentUri(
+                MediaStore.VOLUME_EXTERNAL_PRIMARY);
+
+        // 1. First insert a pending row
+        final ContentValues targetValues = new ContentValues();
+        targetValues.put(MediaColumns.DISPLAY_NAME, displayName);
+        targetValues.put(MediaColumns.MIME_TYPE, "image/jpeg");
+        targetValues.put(MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES);
+        targetValues.put(MediaColumns.IS_PENDING, 1);
+        final Uri targetUri = sIsolatedResolver.insert(imagesUri, targetValues);
+        assertNotNull(targetUri);
+
+        // 2. Then insert a 'squatter' row with IS_PENDING=0
+        final ContentValues attackerValues = new ContentValues();
+        attackerValues.put(MediaColumns.DISPLAY_NAME, displayName);
+        attackerValues.put(MediaColumns.MIME_TYPE, "image/jpeg");
+        attackerValues.put(MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES);
+        attackerValues.put(MediaColumns.IS_PENDING, 0);
+        final Uri attackerUri = sIsolatedResolver.insert(imagesUri, attackerValues);
+        assertNotNull(attackerUri);
+
+        // 3. Update the first row to publish it (clear IS_PENDING)
+        targetValues.clear();
+        targetValues.put(MediaColumns.IS_PENDING, 0);
+        Bundle updateExtras = new Bundle();
+        updateExtras.putBoolean(MediaStore.QUERY_ARG_ALLOW_MOVEMENT, true);
+        // This update should succeed, and internally it should delete the 'squatter' row
+        // because the physical file does not exist.
+        assertEquals(1, sIsolatedResolver.update(targetUri, targetValues, updateExtras));
+
+        // 4. Verify 'squatter' row is gone by querying attackerUri
+        try (Cursor c = sIsolatedResolver.query(attackerUri, null, null, null, null)) {
+            // The query should return 0 rows if the squatter entry was successfully deleted
+            assertNotNull(c);
+            assertEquals(0, c.getCount());
+        }
+    }
+
+    @Test
+    public void testPendingUpdate_SquatterRowFileExists() throws Exception {
+        final File dir = Environment
+                .getExternalStoragePublicDirectory(Environment.DIRECTORY_PICTURES);
+        final String baseName = "test" + System.nanoTime();
+        final String displayName = baseName + ".jpg";
+        final Uri imagesUri = MediaStore.Images.Media.getContentUri(
+                MediaStore.VOLUME_EXTERNAL_PRIMARY);
+
+        // 1. First insert a pending row
+        final ContentValues targetValues = new ContentValues();
+        targetValues.put(MediaColumns.DISPLAY_NAME, displayName);
+        targetValues.put(MediaColumns.MIME_TYPE, "image/jpeg");
+        targetValues.put(MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES);
+        targetValues.put(MediaColumns.IS_PENDING, 1);
+        final Uri targetUri = sIsolatedResolver.insert(imagesUri, targetValues);
+        assertNotNull(targetUri);
+
+        // 2. Then insert a 'squatter' row with IS_PENDING=0
+        final ContentValues attackerValues = new ContentValues();
+        attackerValues.put(MediaColumns.DISPLAY_NAME, displayName);
+        attackerValues.put(MediaColumns.MIME_TYPE, "image/jpeg");
+        attackerValues.put(MediaColumns.RELATIVE_PATH, Environment.DIRECTORY_PICTURES);
+        attackerValues.put(MediaColumns.IS_PENDING, 0);
+        final Uri attackerUri = sIsolatedResolver.insert(imagesUri, attackerValues);
+        assertNotNull(attackerUri);
+
+        // Now that the 'squatter' row has claimed the original displayName,
+        // physically stage the file to ensure the file exists on disk.
+        final File file = new File(dir, displayName);
+        try {
+            stage(R.raw.lg_g4_iso_800_jpg, file);
+
+            // 3. Update the first row to publish it (clear IS_PENDING)
+            targetValues.clear();
+            targetValues.put(MediaColumns.IS_PENDING, 0);
+            Bundle updateExtras = new Bundle();
+            updateExtras.putBoolean(MediaStore.QUERY_ARG_ALLOW_MOVEMENT, true);
+
+            // This update should succeed, but internally it will rename to a unique name
+            // because the physical file exists and the 'squatter' row is valid.
+            assertEquals(1, sIsolatedResolver.update(targetUri, targetValues, updateExtras));
+
+            // 4. Verify 'squatter' row is NOT gone
+            try (Cursor c = sIsolatedResolver.query(attackerUri, null, null, null, null)) {
+                assertNotNull(c);
+                assertEquals(1, c.getCount());
+            }
+
+            // 5. Verify the first row's file was given a unique name
+            try (Cursor c = sIsolatedResolver.query(targetUri,
+                    new String[]{MediaColumns.DISPLAY_NAME, MediaColumns.DATA}, null, null, null)) {
+                assertNotNull(c);
+                assertEquals(1, c.getCount());
+                c.moveToFirst();
+                assertNotEquals(displayName, c.getString(0));
+            }
+        } finally {
+            file.delete();
+        }
+    }
+
+    @Test
     public void testGetType() throws Exception {
         final File dir = Environment
                 .getExternalStoragePublicDirectory(Environment.DIRECTORY_DOWNLOADS);

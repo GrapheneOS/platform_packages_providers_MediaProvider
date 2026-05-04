@@ -10086,6 +10086,7 @@ public class MediaProvider extends ContentProvider {
         // blend in current values and recalculate path
         final boolean allowMovement = extras.getBoolean(MediaStore.QUERY_ARG_ALLOW_MOVEMENT,
                 !isCallingPackageSelf());
+        String renameAfterPath = null;
         if (containsAny(initialValues.keySet(), sPlacementColumns)
                 && !initialValues.containsKey(MediaColumns.DATA)
                 && !isThumbnail
@@ -10182,8 +10183,11 @@ public class MediaProvider extends ContentProvider {
                 }
 
 
+                checkIfPathAlreadyExists(helper, beforeVolume, afterPath);
+
                 Logging.logIfLoggable(TAG, "Moving " + beforePath + " to " + afterPath,
                         Log.DEBUG, /* logOnlyIfDebuggable */true);
+                renameAfterPath = afterPath;
                 try {
                     Os.rename(beforePath, afterPath);
                     markPathAsDeletedAndInvalidateFuseDentry(beforePath);
@@ -10294,7 +10298,8 @@ public class MediaProvider extends ContentProvider {
             }
         }
 
-        count = updateAllowingReplace(qb, helper, values, userWhere, userWhereArgs);
+        count = updateAllowingReplace(qb, helper, values, userWhere, userWhereArgs,
+                renameAfterPath);
 
         // If the caller tried (and failed) to update metadata, the file on disk
         // might have changed, to scan it to collect the latest metadata.
@@ -10416,7 +10421,8 @@ public class MediaProvider extends ContentProvider {
      */
     private int updateAllowingReplace(@NonNull SQLiteQueryBuilder qb,
             @NonNull DatabaseHelper helper, @NonNull ContentValues values, String userWhere,
-            String[] userWhereArgs) throws SQLiteConstraintException {
+            String[] userWhereArgs, @Nullable String renameAfterPath)
+            throws SQLiteConstraintException {
         return helper.runWithTransaction((db) -> {
             try {
                 return qb.update(helper, values, userWhere, userWhereArgs);
@@ -10425,17 +10431,16 @@ public class MediaProvider extends ContentProvider {
                 // explicitly inserted db row to this file. We have to resolve this update with a
                 // replace.
 
+                final String path = values.getAsString(FileColumns.DATA);
+                final int handleCount = handleNonExistingEntryFile(qb, helper, values,
+                        userWhere, userWhereArgs, path, renameAfterPath, e);
+                if (handleCount != -1) {
+                    return handleCount;
+                }
+
                 if (getCallingPackageTargetSdkVersion() >= Build.VERSION_CODES.R) {
                     // We don't support replace for non-legacy apps. Non legacy apps should have
                     // clearer interactions with MediaProvider.
-                    throw e;
-                }
-
-                final String path = values.getAsString(FileColumns.DATA);
-
-                // We will only handle UNIQUE constraint error for FileColumns.DATA. We will not try
-                // update and replace if no file exists for conflicting db row.
-                if (path == null || !new File(path).exists()) {
                     throw e;
                 }
 
@@ -10461,6 +10466,73 @@ public class MediaProvider extends ContentProvider {
                 throw e;
             }
         });
+    }
+
+    /** Resolves conflict by deleting stale database entry if file doesn't exist on disk. */
+    private int handleNonExistingEntryFile(SQLiteQueryBuilder qb,
+            DatabaseHelper helper, ContentValues values, String userWhere,
+            String[] userWhereArgs, String path, @Nullable String renameAfterPath,
+            SQLiteConstraintException e)
+            throws SQLiteConstraintException {
+        if (path == null) {
+            throw e;
+        }
+
+        if (Objects.equals(path, renameAfterPath)) {
+            if (deleteEntryForPath(helper, path) > 0) {
+                return qb.update(helper, values, userWhere, userWhereArgs);
+            }
+        }
+        return -1;
+    }
+
+    /** Deletes database entry for the given path. */
+    private int deleteEntryForPath(DatabaseHelper helper, String path) {
+        final LocalCallingIdentity token = clearLocalCallingIdentity();
+        try {
+            return helper.runWithTransaction((db) -> {
+                try {
+                    int count = db.delete(Files.TABLE, "_data=?", new String[]{path});
+                    if (count > 0) {
+                        Log.v(TAG, "Deleted stale entry");
+                    }
+                    return count;
+                } catch (Exception e) {
+                    Log.e(TAG, "Failure in deleting stale entry", e);
+                }
+                return 0;
+            });
+        } finally {
+            restoreLocalCallingIdentity(token);
+        }
+    }
+
+    /** Checks if a file path exists and verifies caller permission if it does. */
+    private void checkIfPathAlreadyExists(DatabaseHelper helper, String volume, String afterPath) {
+        final LocalCallingIdentity token = clearLocalCallingIdentity();
+        long id = -1;
+        try (Cursor c = queryForSingleItem(MediaStore.Files.getContentUri(volume),
+                new String[]{BaseColumns._ID},
+                MediaColumns.DATA + "=?", new String[]{afterPath}, null)) {
+            if (c == null) {
+                return;
+            }
+            id = c.getLong(c.getColumnIndex(BaseColumns._ID));
+            if (!new File(afterPath).exists()) {
+                // delete stale entry
+                deleteEntryForPath(helper, afterPath);
+                return;
+            }
+        } catch (FileNotFoundException e) {
+            // Path does not exist
+            return;
+        } finally {
+            restoreLocalCallingIdentity(token);
+        }
+
+        Uri uri = MediaStore.Files.getContentUri(volume, id);
+        // If file and DB row both exist, verify caller's write access on the row
+        enforceCallingPermission(uri, Bundle.EMPTY, /* forWrite */ true);
     }
 
     /**
