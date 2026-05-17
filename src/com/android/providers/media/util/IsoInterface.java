@@ -189,15 +189,15 @@ public class IsoInterface {
 
             if (Objects.equals(box.uuid, XMP_UUID)) {
                 box.data = allocateBuffer(type, (int) (len - box.headerSize));
-                if (box.data == null) return false;
-
-                Os.read(fd, box.data, 0, box.data.length);
+                if (box.data != null) {
+                    Os.read(fd, box.data, 0, box.data.length);
+                }
             }
         } else if (type == BOX_XMP) {
             box.data = allocateBuffer(type, (int) (len - box.headerSize));
-            if (box.data == null) return false;
-
-            Os.read(fd, box.data, 0, box.data.length);
+            if (box.data != null) {
+                Os.read(fd, box.data, 0, box.data.length);
+            }
         } else if (type == BOX_META && len != headerSize) {
             // The format of this differs in ISO and QT encoding:
             // (iso) [1 byte version + 3 bytes flags][4 byte size of next atom]

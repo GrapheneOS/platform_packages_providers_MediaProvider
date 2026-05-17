@@ -169,6 +169,13 @@ public final class XmpDataParser implements Closeable {
     //    /** The [start, end] offsets in the original file where to-be redacted info is
     //    stored */
     private static LongArray getRedactionRanges(XmpData xmpData) throws IOException {
+        // when the XMP box is too large to load then mRawXmp.length will be 0 but offsets
+        // will be non zero
+        if (xmpData.mRawXmp.length == 0 && xmpData.mXmpOffsets.length > 0) {
+            // If we know the XMP is oversized, redact the entire XMP range.
+            return LongArray.fromArray(xmpData.mXmpOffsets, xmpData.mXmpOffsets.length);
+        }
+
         try (XmpDataParser parser = new XmpDataParser(xmpData.mRawXmp, xmpData.mXmpOffsets)) {
             return parser.getRedactedRanges();
         } catch (XmlPullParserException e) {
@@ -242,13 +249,16 @@ public final class XmpDataParser implements Closeable {
             byte[] buf = iso.getBoxBytesForXmpUuid();
             long[] xmpOffsets = iso.getBoxRangesForXmpUuid();
 
-            if (buf == null) {
+            // getBoxBytesForXmpUuid will return null if the box is not found or if the size
+            // exceeds 1MB. We check xmpOffsets.length to distinguish between these cases.
+            // If xmpOffsets is non-empty, it means the box was too large to load,
+            // and we should not fall back to BOX_XMP.
+            if (buf == null && xmpOffsets.length == 0) {
                 buf = iso.getBoxBytes(IsoInterface.BOX_XMP);
                 xmpOffsets = iso.getBoxRanges(IsoInterface.BOX_XMP);
             }
             if (buf == null) {
                 buf = new byte[0];
-                xmpOffsets = new long[0];
             }
             return new XmpData(buf, xmpOffsets);
         }
