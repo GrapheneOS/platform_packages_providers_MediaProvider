@@ -183,6 +183,27 @@ public class XmpDataParserTest {
     }
 
     @Test
+    public void testContainer_IsoRedactionRanges_OversizedXmp() throws Exception {
+        final File file = stageMp4File(R.raw.gps_test_xmp_big);
+        final IsoInterface iso = IsoInterface.fromFile(file);
+
+        // Verify that the oversized XMP box was added to the flattened list despite being oversized
+        long[] xmpRanges = iso.getBoxRanges(IsoInterface.BOX_XMP);
+        long[] uuidXmpRanges = iso.getBoxRangesForXmpUuid();
+        assertThat(xmpRanges.length > 0 || uuidXmpRanges.length > 0).isTrue();
+
+        // Verify that the oversized XMP box is flagged for redaction in its entirety
+        final long[] actualRanges = XmpDataParser.getRedactionRanges(iso).toArray();
+        assertThat(actualRanges.length).isEqualTo(2);
+        assertThat(actualRanges[0]).isGreaterThan(0);
+        assertThat(actualRanges[1]).isGreaterThan(actualRanges[0]);
+
+        // Verify that createXmpInterface returns an empty interface (since data was skipped)
+        XmpInterface xmpInterface = XmpDataParser.createXmpInterface(iso);
+        assertThat(xmpInterface.getRedactedXmp()).isEmpty();
+    }
+
+    @Test
     public void testStream_LineOffsets() throws Exception {
         final String xml =
                 "<a:b xmlns:a='a' xmlns:c='c' c:d=''\n  c:f='g'>\n  <c:i>j</c:i>\n  </a:b>";
