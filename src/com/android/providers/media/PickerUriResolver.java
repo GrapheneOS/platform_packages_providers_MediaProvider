@@ -79,6 +79,9 @@ import java.util.stream.Collectors;
 public class PickerUriResolver {
     private static final String TAG = "PickerUriResolver";
 
+private static final LocalUriMatcher sStaticUriMatcher =
+            new LocalUriMatcher(MediaStore.AUTHORITY);
+
     public static final String PICKER_SEGMENT = "picker";
 
     public static final String PICKER_GET_CONTENT_SEGMENT = "picker_get_content";
@@ -420,10 +423,22 @@ public class PickerUriResolver {
         }
 
         Set<Uri> accessibleUris = new HashSet<>();
-        // perform checks and filtration.
+        // Perform checks and filtration.
         for (String uriAsString : inputUris) {
             Uri uriForSelection = Uri.parse(uriAsString);
             try {
+              // Structural & Authority validation
+                if (!isValidPickerUri(uriForSelection)) {
+                    Log.d(TAG, "Filtering Uris for Selection: URI is not a valid picker URI: "
+                            + uriAsString);
+                    continue;
+                }
+
+                // User ID check
+                if (getUserId(uriForSelection) != UserHandle.myUserId()) {
+                    Log.d(TAG, "Uri doesn't map to the current user: " + uriAsString);
+                    continue;
+                }
                 // verify if the calling package have permission to the requested uri.
                 checkUriPermission(uriForSelection, /* pid */ -1, callingUid);
                 accessibleUris.add(uriForSelection);
@@ -487,6 +502,27 @@ public class PickerUriResolver {
     }
 
     /**
+     * Checks if the given URI is a valid Picker URI.
+     *
+     * A valid picker Uri must satisfy:<br>
+     * -Scheme is "content" (ContentResolver.SCHEME_CONTENT)<br>
+     * -Authority must be {@code MediaStore.AUTHORITY}<br>
+     * -Path segments match one of valid picker URI patterns in LocalUriMatcher
+     */
+    public static boolean isValidPickerUri(@Nullable Uri uri) {
+        if (uri == null) {
+            return false;
+        }
+        if (!ContentResolver.SCHEME_CONTENT.equals(uri.getScheme())) {
+            return false;
+        }
+
+        int match = sStaticUriMatcher.matchUri(uri, /* allowHidden */ false);
+        return match == PICKER_ID
+                || match == PICKER_GET_CONTENT_ID || match == PICKER_TRANSCODED_ID;
+    }
+
+    /**
      * Unwraps picker uri for processing host and id.
      */
     public static Uri unwrapProviderUri(Uri uri) {
@@ -525,7 +561,7 @@ public class PickerUriResolver {
      *
      * @param uri The picker URI.
      */
-    static int getUserId(Uri uri) {
+    public static int getUserId(Uri uri) {
         // content://media/picker/<user-id>/<media-id>/...
         return Integer.parseInt(uri.getPathSegments().get(1));
     }

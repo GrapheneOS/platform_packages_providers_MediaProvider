@@ -338,7 +338,7 @@ public class PickerUriResolverTest {
     @Test
     public void testProcessUrisForSelection_permissionChecks() {
         sTestPickerUri = getPickerUriForId(ContentUris.parseId(sMediaStoreUriInOtherContext),
-                TEST_USER, ACTION_PICK_IMAGES);
+                UserHandle.myUserId(), ACTION_PICK_IMAGES);
 
         // the test uid can be any id but not the current id.
         int testUid = Process.myUid() + 1;
@@ -388,7 +388,7 @@ public class PickerUriResolverTest {
         long testCloudId = 1234567890;
         String testCloudAuthority = "com.test.cloud.authority";
         Uri testCloudUri = getPickerUriForIdWithCustomAuthority(testCloudId,
-                TEST_USER, ACTION_PICK_IMAGES, testCloudAuthority);
+                UserHandle.myUserId(), ACTION_PICK_IMAGES, testCloudAuthority);
 
         // the test uid can be any id but not the current id.
         int testUid = Process.myUid() + 1;
