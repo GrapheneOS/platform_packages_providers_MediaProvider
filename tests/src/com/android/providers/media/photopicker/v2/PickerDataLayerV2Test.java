@@ -270,6 +270,8 @@ public class PickerDataLayerV2Test {
                     .getTargetContext().getResources())
                 .when(mMockContext).getResources();
 
+        doReturn(Process.myUserHandle()).when(mMockContext).getUser();
+
         mTestConfigStore = new TestConfigStore();
 
         androidx.test.platform.app.InstrumentationRegistry.getInstrumentation()
@@ -1914,7 +1916,8 @@ public class PickerDataLayerV2Test {
 
         queryArgs.putInt(Intent.EXTRA_UID, Process.myUid());
         // add uris for selection
-        String uriPlaceHolder = "content://media/picker/0/%s/media/%s";
+        String uriPlaceHolder = "content://media/picker/"
+                + UserHandle.myUserId() + "/%s/media/%s";
         queryArgs.putStringArrayList("pre_selection_uris", new ArrayList<>(Arrays.asList(
                 String.format(uriPlaceHolder, LOCAL_PROVIDER, LOCAL_ID_1) // valid local uri
         )));
@@ -1960,7 +1963,8 @@ public class PickerDataLayerV2Test {
 
         queryArgs.putInt(Intent.EXTRA_UID, Process.myUid());
         // add uris for selection
-        String uriPlaceHolder = "content://media/picker/0/%s/media/%s";
+        String uriPlaceHolder = "content://media/picker/"
+                + UserHandle.myUserId() + "/%s/media/%s";
         queryArgs.putStringArrayList("pre_selection_uris", new ArrayList<>(Arrays.asList(
                 String.format(uriPlaceHolder, CLOUD_PROVIDER, CLOUD_ID_2) // valid cloud uri
         )));
@@ -1975,6 +1979,38 @@ public class PickerDataLayerV2Test {
 
             cr.moveToFirst();
             assertMediaCursor(cr, CLOUD_ID_2, CLOUD_PROVIDER, DATE_TAKEN_MS, MP4_VIDEO_MIME_TYPE);
+        }
+    }
+
+   @Test
+    public void testQueryMediaForPreSelection_ignoresCrossUserUris() {
+        Cursor cursorLocal = getMediaCursor(LOCAL_ID_1, DATE_TAKEN_MS, GENERATION_MODIFIED,
+                /* mediaStoreUri */ null, /* sizeBytes */ 1, MP4_VIDEO_MIME_TYPE,
+                STANDARD_MIME_TYPE_EXTENSION, /* isFavorite */ false);
+        assertAddMediaOperation(mFacade, LOCAL_PROVIDER, cursorLocal, 1);
+
+        Bundle queryArgs = getMediaQueryExtras(Long.MAX_VALUE, DATE_TAKEN_MS, /* pageSize */ 2,
+                new ArrayList<>(Arrays.asList(LOCAL_PROVIDER, CLOUD_PROVIDER)));
+        queryArgs.putInt(Intent.EXTRA_UID, Process.myUid());
+
+        // Construct a Uri that points to a different user: currentUser + 1,
+        // but has the same media ID (LOCAL_ID_1).
+        int differentUserId = UserHandle.myUserId() + 1;
+        String crossUserUri =
+                String.format(
+                        "content://media/picker/%d/%s/media/%s",
+                        differentUserId, LOCAL_PROVIDER, LOCAL_ID_1);
+
+        queryArgs.putStringArrayList(
+                "pre_selection_uris",
+                new ArrayList<>(Arrays.asList(crossUserUri))
+        );
+
+        try (Cursor cr = PickerDataLayerV2.queryMediaForPreSelection(mMockContext, queryArgs)) {
+            // Verify that the media item is not returned in the preselection.
+            assertWithMessage("Cross-user preselection URI should be ignored")
+                    .that(cr.getCount())
+                    .isEqualTo(0);
         }
     }
 
@@ -2007,7 +2043,8 @@ public class PickerDataLayerV2Test {
 
         queryArgs.putInt(Intent.EXTRA_UID, Process.myUid());
         // add uris for selection
-        String uriPlaceHolder = "content://media/picker/0/%s/media/%s";
+        String uriPlaceHolder = "content://media/picker/"
+                + UserHandle.myUserId() + "/%s/media/%s";
         queryArgs.putStringArrayList("pre_selection_uris", new ArrayList<>(Arrays.asList(
                 String.format(uriPlaceHolder, LOCAL_PROVIDER, LOCAL_ID_1), // valid local uri
                 String.format(uriPlaceHolder, CLOUD_PROVIDER, CLOUD_ID_2), // valid cloud uri
@@ -2029,6 +2066,135 @@ public class PickerDataLayerV2Test {
             assertMediaCursor(cr, CLOUD_ID_2, CLOUD_PROVIDER, DATE_TAKEN_MS, MP4_VIDEO_MIME_TYPE);
 
             cr.moveToNext();
+            assertMediaCursor(cr, LOCAL_ID_1, LOCAL_PROVIDER, DATE_TAKEN_MS, MP4_VIDEO_MIME_TYPE);
+        }
+    }
+
+    @Test
+    public void testQueryMediaForPreSelection_ignoresMalformedUris() {
+        // Insert a valid local media item first
+        Cursor cursorLocal = getMediaCursor(LOCAL_ID_1, DATE_TAKEN_MS, GENERATION_MODIFIED,
+                /* mediaStoreUri */ null, /* sizeBytes */ 1, MP4_VIDEO_MIME_TYPE,
+                STANDARD_MIME_TYPE_EXTENSION, /* isFavorite */ false);
+        assertAddMediaOperation(mFacade, LOCAL_PROVIDER, cursorLocal, 1);
+
+        Bundle queryArgs = getMediaQueryExtras(Long.MAX_VALUE, DATE_TAKEN_MS, /* pageSize */ 2,
+                new ArrayList<>(Arrays.asList(LOCAL_PROVIDER, CLOUD_PROVIDER)));
+        queryArgs.putInt(Intent.EXTRA_UID, Process.myUid());
+
+        // Prepare various malformed URIs
+        // 1. Too few segments
+        String malformedUri1 = "content://media/picker";
+        // 2. Non-numeric user ID
+        String malformedUri2 = String.format(
+                "content://media/picker/abc/%s/media/%s", LOCAL_PROVIDER, LOCAL_ID_1);
+        // 3. Wrong segment count (4 segments)
+        String malformedUri3 = "content://media/picker/0/local/media";
+
+        // A valid URI pointing to the inserted local media
+        String acceptablePickerUri = "content://media/picker/"
+                + UserHandle.myUserId() + "/" + LOCAL_PROVIDER + "/media/" + LOCAL_ID_1;
+
+        queryArgs.putStringArrayList(
+                "pre_selection_uris",
+                new ArrayList<>(Arrays.asList(
+                        malformedUri1, malformedUri2, malformedUri3, acceptablePickerUri))
+        );
+
+        try (Cursor cr = PickerDataLayerV2.queryMediaForPreSelection(mMockContext, queryArgs)) {
+            assertWithMessage("Malformed preselection URIs should be ignored, "
+                    + "but valid URIs should be returned")
+                    .that(cr.getCount())
+                    .isEqualTo(1);
+
+            cr.moveToFirst();
+            assertMediaCursor(cr, LOCAL_ID_1, LOCAL_PROVIDER, DATE_TAKEN_MS, MP4_VIDEO_MIME_TYPE);
+        }
+    }
+
+    @Test
+    public void testQueryMediaForPreSelection_ignoresFakeAuthorityUris() {
+        // Insert a valid local media item first
+        Cursor cursorLocal = getMediaCursor(LOCAL_ID_1, DATE_TAKEN_MS, GENERATION_MODIFIED,
+                /* mediaStoreUri */ null, /* sizeBytes */ 1, MP4_VIDEO_MIME_TYPE,
+                STANDARD_MIME_TYPE_EXTENSION, /* isFavorite */ false);
+        assertAddMediaOperation(mFacade, LOCAL_PROVIDER, cursorLocal, 1);
+
+        Bundle queryArgs = getMediaQueryExtras(Long.MAX_VALUE, DATE_TAKEN_MS, /* pageSize */ 2,
+                new ArrayList<>(Arrays.asList(LOCAL_PROVIDER, CLOUD_PROVIDER)));
+        queryArgs.putInt(Intent.EXTRA_UID, Process.myUid());
+
+        // Prepare fake authority URIs
+        // Fake authority "fake.auth"
+        String fakeUri1 = "content://fake.auth/picker/" + UserHandle.myUserId() + "/"
+                + LOCAL_PROVIDER + "/media/" + LOCAL_ID_1;
+        // Fake authority "media.fake"
+        String fakeUri2 = "content://media.fake/picker/" + UserHandle.myUserId() + "/"
+                + LOCAL_PROVIDER + "/media/" + LOCAL_ID_1;
+
+        // A valid URI pointing to the inserted local media
+        String acceptablePickerUri = "content://media/picker/"
+                + UserHandle.myUserId() + "/" + LOCAL_PROVIDER + "/media/" + LOCAL_ID_1;
+
+        queryArgs.putStringArrayList(
+                "pre_selection_uris",
+                new ArrayList<>(Arrays.asList(fakeUri1, fakeUri2, acceptablePickerUri))
+        );
+
+        try (Cursor cr = PickerDataLayerV2.queryMediaForPreSelection(mMockContext, queryArgs)) {
+            assertWithMessage("URIs with fake authorities should be ignored, "
+                    + "but valid URIs should be returned")
+                    .that(cr.getCount())
+                    .isEqualTo(1);
+
+            cr.moveToFirst();
+            assertMediaCursor(cr, LOCAL_ID_1, LOCAL_PROVIDER, DATE_TAKEN_MS, MP4_VIDEO_MIME_TYPE);
+        }
+    }
+
+    @Test
+    public void testQueryMediaForPreSelection_ignoresInvalidPickerSegments() {
+        // Insert a valid local media item first
+        Cursor cursorLocal = getMediaCursor(LOCAL_ID_1, DATE_TAKEN_MS, GENERATION_MODIFIED,
+                /* mediaStoreUri */ null, /* sizeBytes */ 1, MP4_VIDEO_MIME_TYPE,
+                STANDARD_MIME_TYPE_EXTENSION, /* isFavorite */ false);
+        assertAddMediaOperation(mFacade, LOCAL_PROVIDER, cursorLocal, 1);
+
+        Bundle queryArgs = getMediaQueryExtras(Long.MAX_VALUE, DATE_TAKEN_MS, /* pageSize */ 2,
+                new ArrayList<>(Arrays.asList(LOCAL_PROVIDER, CLOUD_PROVIDER)));
+        queryArgs.putInt(Intent.EXTRA_UID, Process.myUid());
+
+        // Prepare URIs with invalid picker segments
+        // Invalid first segment "invalid_segment"
+        String invalidUri1 = "content://media/invalid_segment/"
+                + UserHandle.myUserId() + "/" + LOCAL_PROVIDER + "/media/" + LOCAL_ID_1;
+        // Invalid first segment "picker_internal"
+        String invalidUri2 = "content://media/picker_internal/"
+                + UserHandle.myUserId() + "/" + LOCAL_PROVIDER + "/media/" + LOCAL_ID_1;
+        // Invalid fourth segment "album" instead of "media"
+        String invalidUri3 = "content://media/picker/"
+                + UserHandle.myUserId() + "/" + LOCAL_PROVIDER + "/album/" + LOCAL_ID_1;
+        // Invalid fourth segment "invalid" instead of "media"
+        String invalidUri4 = "content://media/picker/"
+                + UserHandle.myUserId() + "/" + LOCAL_PROVIDER + "/invalid/" + LOCAL_ID_1;
+
+        // A valid URI pointing to the inserted local media
+        String acceptablePickerUri = "content://media/picker/"
+                + UserHandle.myUserId() + "/" + LOCAL_PROVIDER + "/media/" + LOCAL_ID_1;
+
+        queryArgs.putStringArrayList(
+                "pre_selection_uris",
+                new ArrayList<>(Arrays.asList(
+                        invalidUri1, invalidUri2, invalidUri3, invalidUri4, acceptablePickerUri))
+        );
+
+        try (Cursor cr = PickerDataLayerV2.queryMediaForPreSelection(mMockContext, queryArgs)) {
+            assertWithMessage("URIs with invalid picker segments should be ignored, "
+                    + "but valid URIs should be returned")
+                    .that(cr.getCount())
+                    .isEqualTo(1);
+
+            cr.moveToFirst();
             assertMediaCursor(cr, LOCAL_ID_1, LOCAL_PROVIDER, DATE_TAKEN_MS, MP4_VIDEO_MIME_TYPE);
         }
     }

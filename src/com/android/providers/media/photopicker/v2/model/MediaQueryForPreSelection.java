@@ -23,6 +23,7 @@ import static com.android.providers.media.photopicker.v2.sqlite.MediaProjection.
 import android.content.Context;
 import android.net.Uri;
 import android.os.Bundle;
+import android.os.UserHandle;
 import android.util.Log;
 
 import androidx.annotation.NonNull;
@@ -129,11 +130,24 @@ public class MediaQueryForPreSelection extends MediaQuery {
         }
 
         Set<Uri> accessibleUris = new HashSet<>();
-        // perform checks and filtration.
+        // Perform checks and filtration.
         for (String uriAsString : inputUris) {
             Uri uriForSelection = Uri.parse(uriAsString);
             try {
-                // verify if the calling package have permission to the requested uri.
+                // Structural & Authority validation
+                if (!PickerUriResolver.isValidPickerUri(uriForSelection)) {
+                    Log.d(TAG, "Filtering Uris for Selection: URI is not a valid picker URI: "
+                            + uriAsString);
+                    continue;
+                }
+
+                // User ID check
+                if (PickerUriResolver.getUserId(uriForSelection) != UserHandle.myUserId()) {
+                    Log.d(TAG, "Uri doesn't map to the current user: " + uriAsString);
+                    continue;
+                }
+
+                // Permission check
                 PickerUriResolver.checkUriPermission(appContext,
                         uriForSelection, /* pid */ -1, callingPackageUid);
                 accessibleUris.add(uriForSelection);
