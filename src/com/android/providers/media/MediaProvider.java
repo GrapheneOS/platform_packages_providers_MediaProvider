@@ -4496,28 +4496,34 @@ public class MediaProvider extends ContentProvider {
             Arrays.asList(projection).replaceAll(String::toLowerCase);
         }
 
+        qb.enforceStrictColumns(projection);
+        projection = maybeReplaceNullProjection(projection, qb);
+
+        // Collect columns that need to be filtered to return as NULL.
+        List<String> columnsToFilter = new ArrayList<>();
+
         if (Flags.enableOemMetadata()
-                && hasColumnsToFilterInProjection(qb, projection, List.of(OEM_METADATA))
                 && !mCallingIdentity.get().checkCallingPermissionOemMetadata()) {
-            // Filter oem_data column to return as NULL
-            projection = updateProjectionToFilterColumns(qb, projection, List.of(OEM_METADATA));
+            // Add OEM_METADATA column to columnsToFilter list
+            columnsToFilter.add(OEM_METADATA);
         }
 
         // The prev deprecated latitude and longitude columns are being populated again for
         // picker search. We prevent any read access to them if they are present in the
         // query projection.
-        if (indexMediaLatitudeLongitude() && hasColumnsToFilterInProjection(
-                        qb, projection, List.of(LATITUDE, LONGITUDE)) && !isCallingPackageSelf()) {
-            // Filter latitude and longitude to return as NULL
-            projection = updateProjectionToFilterColumns(
-                    qb, projection,  List.of(LATITUDE, LONGITUDE));
+        if (indexMediaLatitudeLongitude() && !isCallingPackageSelf()) {
+            // Add LATITUDE and LONGITUDE column to columnsToFilter list
+            columnsToFilter.add(LATITUDE);
+            columnsToFilter.add(LONGITUDE);
         }
 
-        if (!enableSpecialFormatColumn() && hasColumnsToFilterInProjection(
-                qb, projection, List.of(_SPECIAL_FORMAT)) && !isCallingPackageSelf()) {
-            // Filter _SPECIAL_FORMAT column to return as NULL
-            projection = updateProjectionToFilterColumns(
-                    qb, projection,  List.of(_SPECIAL_FORMAT));
+        if (!enableSpecialFormatColumn() && !isCallingPackageSelf()) {
+            // Add _SPECIAL_FORMAT column to columnsToFilter list
+            columnsToFilter.add(_SPECIAL_FORMAT);
+        }
+
+        if (!columnsToFilter.isEmpty()) {
+            projection = updateProjectionToFilterColumns(qb, projection, columnsToFilter);
         }
 
         if (shouldFilterOwnerPackageNameFlag()
@@ -4567,51 +4573,109 @@ public class MediaProvider extends ContentProvider {
         return c;
     }
 
-    private boolean hasColumnsToFilterInProjection(
-            SQLiteQueryBuilder qb, String[] projection, List<String> columnsToFilter) {
-        boolean columnsFound = false;
-        List<String> projectionList = projection == null ? new ArrayList<>() : Arrays.asList(
-                projection);
-        for (String column: columnsToFilter) {
-            columnsFound = (!projectionList.isEmpty() && projectionList.contains(column))
-                    || (projection == null && qb.getProjectionMap() != null
-                    && qb.getProjectionMap().containsKey(column));
-            if (columnsFound) {
-                return columnsFound;
-            }
-        }
-        return columnsFound;
-    }
-
     private String[] updateProjectionToFilterColumns(
             SQLiteQueryBuilder qb, String[] projection, List<String> columnsToFilter) {
-        projection = maybeReplaceNullProjection(projection, qb);
-        List<String> projectionList = Arrays.asList(projection); // Creates a copy by reference
-        projectionList.replaceAll(String::toLowerCase); // Re-assert projection list is in lowercase
+        if (projection == null) return null;
 
-        if (qb.getProjectionAllowlist() == null) {
-            qb.setProjectionAllowlist(new ArrayList<>());
-        }
+        String[] updatedProjection = new String[projection.length];
+        boolean isUpdated = false;
 
-        for (String columnToFilter: columnsToFilter) {
-            if (projectionList.contains(columnToFilter)) {
-                int indexOfColumnToBeFiltered = projectionList.indexOf(columnToFilter);
-                String newProjection = constructNullProjectionForColumn(columnToFilter);
-                projectionList.set(
-                        indexOfColumnToBeFiltered,
-                        newProjection
-                );
-                // Allow constructed null column in projection
-                final String escapedColumnCase = Pattern.quote(newProjection);
-                qb.getProjectionAllowlist().add(Pattern.compile(escapedColumnCase));
+        for (int i = 0; i < projection.length; i++) {
+            String projElement = projection[i];
+            if (projElement == null) {
+                updatedProjection[i] = null;
+                continue;
+            }
+
+            // Extract DISTINCT or ALL prefix
+            String prefix = "";
+            String cleaned = projElement.trim();
+            String upper = cleaned.toUpperCase(Locale.ROOT);
+            if (upper.startsWith("DISTINCT ")) {
+                prefix = "DISTINCT ";
+                cleaned = cleaned.substring("DISTINCT ".length()).trim();
+            } else if (upper.startsWith("ALL ")) {
+                prefix = "ALL ";
+                cleaned = cleaned.substring("ALL ".length()).trim();
+            }
+
+            String[] split = splitProjection(projElement);
+            String expr = split[0];
+            String alias = split[1];
+            String targetProjection = projElement;
+
+            boolean elementUpdated = false;
+            for (String columnToFilter : columnsToFilter) {
+                if (containsWord(expr, columnToFilter)) {
+                    targetProjection = constructNullProjectionForExpression(expr, alias,
+                            columnToFilter);
+                    if (qb.getProjectionAllowlist() == null) {
+                        qb.setProjectionAllowlist(new ArrayList<>());
+                    }
+                    // Allow constructed null column in projection (with prefix preserved)
+                    final String escapedColumnCase = Pattern.quote(prefix + targetProjection);
+                    qb.getProjectionAllowlist().add(Pattern.compile(escapedColumnCase));
+                    elementUpdated = true;
+                    isUpdated = true;
+                    break;
+                }
+            }
+
+            if (elementUpdated) {
+                updatedProjection[i] = prefix + targetProjection;
+            } else {
+                updatedProjection[i] = projElement;
             }
         }
-        String[] updatedProjection = new String[projectionList.size()];
-        return projectionList.toArray(updatedProjection);
+
+        return isUpdated ? updatedProjection : projection;
     }
 
-    private String constructNullProjectionForColumn(String columnName) {
-        return "null as " + columnName;
+    private static boolean containsWord(String projElement, String columnToFilter) {
+        if (projElement == null || columnToFilter == null) return false;
+
+        // Fast path: avoid expensive Pattern/Matcher allocations if there is no substring match.
+        if (!projElement.toLowerCase(Locale.ROOT)
+                .contains(columnToFilter.toLowerCase(Locale.ROOT))) {
+            return false;
+        }
+
+        Pattern pattern = FILTER_COLUMN_PATTERNS.get(columnToFilter);
+        if (pattern == null) {
+            pattern = Pattern.compile("\\b" + Pattern.quote(columnToFilter) + "\\b",
+                    Pattern.CASE_INSENSITIVE);
+        }
+        return pattern.matcher(projElement).find();
+    }
+
+    private String[] splitProjection(String projElement) {
+        String cleaned = projElement.trim();
+        Matcher matcher = ALIAS_PATTERN.matcher(cleaned);
+
+        String[] result;
+        if (matcher.find()) {
+            String expr = cleaned.substring(0, matcher.start()).trim();
+            String alias = matcher.group(1).trim();
+            result = new String[]{expr, alias};
+        } else {
+            result = new String[]{cleaned, null};
+        }
+        return result;
+    }
+
+    private String constructNullProjectionForExpression(String expr, String alias,
+            String columnToFilter) {
+        if (alias != null) {
+            return "null as " + alias;
+        } else {
+            if (expr.equalsIgnoreCase(columnToFilter)) {
+                return "null as " + expr;
+            } else {
+                // Escape double quotes by doubling them to prevent SQL injection/syntax errors
+                String escapedExpr = expr.replace("\"", "\"\"");
+                return "null as \"" + escapedExpr + "\"";
+            }
+        }
     }
 
     /**
@@ -4683,6 +4747,28 @@ public class MediaProvider extends ContentProvider {
             projection = qb.getAllColumnsFromProjectionMap();
             // Allow all columns from the projection map
             qb.setStrictColumns(false);
+            return projection;
+        }
+
+        // Only expand explicit wildcards ("*") for legacy callers (targetSdkVersion < Q)
+        if (getCallingPackageTargetSdkVersion() < Build.VERSION_CODES.Q) {
+            boolean hasWildcard = false;
+            String[] allColumns = qb.getAllColumnsFromProjectionMap();
+            ArrayList<String> expanded = new ArrayList<>();
+            for (String element : projection) {
+                if (element != null && "*".equals(element.trim())) {
+                    if (allColumns != null) {
+                        expanded.addAll(Arrays.asList(allColumns));
+                    }
+                    hasWildcard = true;
+                } else {
+                    expanded.add(element);
+                }
+            }
+            if (hasWildcard) {
+                projection = expanded.toArray(new String[0]);
+                qb.setStrictColumns(false);
+            }
         }
         return projection;
     }
@@ -7013,7 +7099,7 @@ public class MediaProvider extends ContentProvider {
         // If caller is an older app, we're willing to let through a
         // allowlist of technically invalid columns
         if (getCallingPackageTargetSdkVersion() < Build.VERSION_CODES.Q) {
-            qb.setProjectionAllowlist(sAllowlist);
+            qb.setProjectionAllowlist(new ArrayList<>(sAllowlist));
         }
 
         // Starting U, if owner package name is used in query arguments,
@@ -13575,6 +13661,30 @@ public class MediaProvider extends ContentProvider {
         sPlacementColumns.add(MediaStore.MediaColumns.IS_TRASHED);
         sPlacementColumns.add(MediaStore.MediaColumns.DATE_EXPIRES);
     }
+
+    private static final Map<String, Pattern> FILTER_COLUMN_PATTERNS = Map.of(
+            LATITUDE, Pattern.compile("\\b" + Pattern.quote(LATITUDE) + "\\b",
+                    Pattern.CASE_INSENSITIVE),
+            LONGITUDE, Pattern.compile("\\b" + Pattern.quote(LONGITUDE) + "\\b",
+                    Pattern.CASE_INSENSITIVE),
+            OEM_METADATA, Pattern.compile("\\b" + Pattern.quote(OEM_METADATA) + "\\b",
+                    Pattern.CASE_INSENSITIVE),
+            _SPECIAL_FORMAT, Pattern.compile("\\b" + Pattern.quote(_SPECIAL_FORMAT) + "\\b",
+                    Pattern.CASE_INSENSITIVE)
+    );
+
+    /**
+     * Matches SQL alias clauses at the end of a projection column expression.
+     * Components:
+     * <ul>
+     *   <li>{@code " "}: Matches a single space separator preceding the alias.</li>
+     *   <li>{@code (?:as )?}: Optionally matches the "as" keyword.</li>
+     *   <li>{@code ([_a-z0-9]+)$}: Captures the alphanumeric/underscore alias name at the end of
+     *   the string.</li>
+     * </ul>
+     */
+    private static final Pattern ALIAS_PATTERN = Pattern.compile(
+            " (?:as )?([_a-z0-9]+)$", Pattern.CASE_INSENSITIVE);
 
     /**
      * List of abusive custom columns that we're willing to allow via

@@ -800,7 +800,10 @@ public class SQLiteQueryBuilder {
         return !Strings.isNullOrEmpty(selection);
     }
 
-    private void enforceStrictColumns(@Nullable String[] projection) {
+    /**
+     * Enforces strict columns on the given projection.
+     */
+    public void enforceStrictColumns(@Nullable String[] projection) {
         Objects.requireNonNull(mProjectionMap, "No projection map defined");
         if (!isStrictColumns()) {
             return;

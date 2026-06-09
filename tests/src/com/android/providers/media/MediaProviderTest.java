@@ -2370,6 +2370,150 @@ public class MediaProviderTest {
 
     @Test
     @RequiresFlagsEnabled(Flags.FLAG_INDEX_MEDIA_LATITUDE_LONGITUDE)
+    public void testQueryingMediaGeolocationData_returnsNull() throws Exception {
+        // We will test several bypass projections that should all return NULL (or be redacted)
+        String[][] projections = new String[][] {
+                // Repeated columns
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        ImageColumns.LATITUDE,
+                        ImageColumns.LATITUDE
+                },
+                // Aggregate column
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        "MIN(" + ImageColumns.LATITUDE + ")"
+                },
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        ImageColumns.LATITUDE,
+                        "MAX(" + ImageColumns.LONGITUDE + ")",
+                }
+        };
+
+        String testFileName = "test" + System.nanoTime() + ".jpg";
+        final File downloads = Environment.getExternalStoragePublicDirectory(
+             Environment.DIRECTORY_DOWNLOADS);
+        File file = stage(R.raw.lg_g4_iso_800_jpg, new File(downloads, testFileName));
+        Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
+
+        try {
+            for (String[] projection : projections) {
+                try (Cursor cursor = sContentResolver.query(testFileUri, projection,
+                        /* selection */ null, /* selectionArgs */ null, /* sortOrder */ null)) {
+                    assertNotNull(cursor);
+                    assertThat(cursor.getCount()).isEqualTo(1);
+                    cursor.moveToFirst();
+
+                    // Check each requested column in the projection (except DISPLAY_NAME)
+                    for (int j = 1; j < projection.length; j++) {
+                        String projElement = projection[j];
+                        // Extract expected column name in cursor
+                        String expectedColumnName = getExpectedColumnName(projElement);
+                        int colIndex = cursor.getColumnIndex(expectedColumnName);
+                        assertTrue("Column " + expectedColumnName + " should be present",
+                                colIndex != -1);
+                        assertTrue("Column " + expectedColumnName + " should be null",
+                                cursor.isNull(colIndex));
+                    }
+                }
+            }
+        } finally {
+            file.delete();
+        }
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_INDEX_MEDIA_LATITUDE_LONGITUDE)
+    public void testQueryingMediaGeolocationDataBypasses_throwsException() throws Exception {
+        String[][] projections = new String[][] {
+                // Aliased aggregate column
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        "MIN(" + ImageColumns.LATITUDE + ") AS min_lat"
+                },
+                // Simple aliased column
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        ImageColumns.LATITUDE + " AS my_lat"
+                },
+                // Simple aliased column without AS
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        ImageColumns.LATITUDE + " my_lat"
+                },
+                // Aliased aggregate column without AS
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        "MIN(" + ImageColumns.LATITUDE + ") min_lat"
+                },
+                // Comma separated projection in a single column
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        ImageColumns.LATITUDE + ", " + ImageColumns.LONGITUDE
+                },
+                // DISTINCT and ALL prefixes (should throw for SDK>=Q)
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        "DISTINCT " + ImageColumns.LATITUDE
+                },
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        "ALL " + ImageColumns.LATITUDE
+                },
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        "distinct " + ImageColumns.LATITUDE
+                },
+                new String[] {
+                        ImageColumns.DISPLAY_NAME,
+                        "DISTINCT MIN(" + ImageColumns.LATITUDE + ")"
+                }
+        };
+
+        String testFileName = "test" + System.nanoTime() + ".jpg";
+        final File downloads = Environment.getExternalStoragePublicDirectory(
+             Environment.DIRECTORY_DOWNLOADS);
+        File file = stage(R.raw.lg_g4_iso_800_jpg, new File(downloads, testFileName));
+        Uri testFileUri = MediaStore.scanFile(sContentResolver, file);
+
+        try {
+            for (String[] projection : projections) {
+                try {
+                    sContentResolver.query(testFileUri, projection,
+                            /* selection */ null, /* selectionArgs */ null, /* sortOrder */ null);
+                    fail("Should have thrown IllegalArgumentException for projection: "
+                            + Arrays.toString(projection));
+                } catch (IllegalArgumentException expected) {
+                    // Expected
+                }
+            }
+        } finally {
+            file.delete();
+        }
+    }
+
+    private String getExpectedColumnName(String projElement) {
+        String cleaned = projElement.trim();
+        String upper = cleaned.toUpperCase(Locale.ROOT);
+        if (upper.startsWith("DISTINCT ")) {
+            cleaned = cleaned.substring("DISTINCT ".length()).trim();
+        } else if (upper.startsWith("ALL ")) {
+            cleaned = cleaned.substring("ALL ".length()).trim();
+        }
+
+        int lastCloseParen = cleaned.lastIndexOf(')');
+        int lastSpace = cleaned.lastIndexOf(' ');
+
+        if (lastSpace != -1 && lastSpace > lastCloseParen) {
+            return cleaned.substring(lastSpace + 1).trim();
+        } else {
+            return cleaned;
+        }
+    }
+
+    @Test
+    @RequiresFlagsEnabled(Flags.FLAG_INDEX_MEDIA_LATITUDE_LONGITUDE)
     public void testQueryingMediaGeolocationDataInSelectionShouldReturnEmptyCursor()
             throws Exception {
         String[] projection = new String[] {
