@@ -569,4 +569,43 @@ public class SearchRequestDatabaseUtilTest {
                 .that(SearchRequestDatabaseUtil.getSearchRequestID(mDatabase, searchRequest2))
                 .isEqualTo(-1);
     }
+
+   @Test
+    public void testMaliciousSearchTextIsTreatedAsRegularSearchQuery() {
+        final List<String> mimeTypes = List.of("image/*", "video/*");
+        final String maliciousSearchText = "test'; DELETE FROM files; --";
+
+        SearchTextRequest searchRequest = new SearchTextRequest(
+                mimeTypes,
+                maliciousSearchText
+        );
+
+        final long insertResult =
+                SearchRequestDatabaseUtil.saveSearchRequest(mDatabase, searchRequest);
+        assertWithMessage("Insert search request failed")
+                .that(insertResult)
+                .isAtLeast(/* minimum row id */ 0);
+
+        final int searchRequestID =
+                SearchRequestDatabaseUtil.getSearchRequestID(mDatabase, searchRequest);
+        assertWithMessage("Search requestID should exist in DB")
+                .that(searchRequestID)
+                .isAtLeast(0);
+
+        final SearchRequest resultSearchRequest =
+                SearchRequestDatabaseUtil.getSearchRequestDetails(mDatabase, searchRequestID);
+
+        assertWithMessage("Unable to fetch search details from the database")
+                .that(resultSearchRequest)
+                .isNotNull();
+        assertWithMessage("Search request should be an instance of SearchTextRequest")
+                .that(resultSearchRequest)
+                .isInstanceOf(SearchTextRequest.class);
+
+        final SearchTextRequest resultSearchTextRequest = (SearchTextRequest) resultSearchRequest;
+
+        assertWithMessage("Search request search text is not as expected")
+                .that(resultSearchTextRequest.getSearchText())
+                .isEqualTo(maliciousSearchText);
+    }
 }
