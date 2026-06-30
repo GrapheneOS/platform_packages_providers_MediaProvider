@@ -156,10 +156,11 @@ public class SearchRequestDatabaseUtil {
                         PickerSQLConstants.SearchRequestTableColumns
                                 .SEARCH_REQUEST_ID.getColumnName()));
 
-        addSearchRequestIDWhereClause(queryBuilder, searchRequest);
+        List<String> selectionArgs = new ArrayList<>();
+        addSearchRequestIDWhereClause(queryBuilder, searchRequest, selectionArgs);
 
         try (Cursor cursor = database.rawQuery(
-                queryBuilder.buildQuery(), /* selectionArgs */ null)) {
+                queryBuilder.buildQuery(), selectionArgs.toArray(new String[0]))) {
             if (cursor.moveToFirst()) {
                 if (cursor.getCount() > 1) {
                     Log.e(TAG, "Cursor cannot have more than one search request match "
@@ -532,10 +533,13 @@ public class SearchRequestDatabaseUtil {
     /**
      * @param queryBuilder Adds where clauses based on the given searchRequest.
      * @param searchRequest Object that contains search request details.
+     * @param selectionArgs String list which collects the selection params from all the
+     *                      where clauses.
      */
     private static void addSearchRequestIDWhereClause(
             @NonNull SelectSQLiteQueryBuilder queryBuilder,
-            @NonNull SearchRequest searchRequest) {
+            @NonNull SearchRequest searchRequest,
+            @NonNull List<String> selectionArgs) {
         String searchText;
         String mediaSetId = null;
         String authority = null;
@@ -559,23 +563,30 @@ public class SearchRequestDatabaseUtil {
         addWhereClause(
                 queryBuilder,
                 PickerSQLConstants.SearchRequestTableColumns.MIME_TYPES.getColumnName(),
-                SearchRequest.getMimeTypesAsString(searchRequest.getMimeTypes()));
+                SearchRequest.getMimeTypesAsString(searchRequest.getMimeTypes()),
+                selectionArgs
+            );
         addWhereClause(
                 queryBuilder,
                 PickerSQLConstants.SearchRequestTableColumns.SEARCH_TEXT.getColumnName(),
-                searchText);
+                searchText,
+                selectionArgs
+            );
         addWhereClause(
                 queryBuilder,
                 PickerSQLConstants.SearchRequestTableColumns.MEDIA_SET_ID.getColumnName(),
-                mediaSetId);
+                mediaSetId, selectionArgs
+            );
         addWhereClause(
                 queryBuilder,
                 PickerSQLConstants.SearchRequestTableColumns.SUGGESTION_AUTHORITY.getColumnName(),
-                authority);
+                authority, selectionArgs
+            );
         addWhereClause(
                 queryBuilder,
                 PickerSQLConstants.SearchRequestTableColumns.SUGGESTION_TYPE.getColumnName(),
-                suggestionType);
+                suggestionType, selectionArgs
+            );
     }
 
     private static void addSearchRequestDetailsWhereClause(
@@ -596,14 +607,17 @@ public class SearchRequestDatabaseUtil {
      * @param value The desired value that needs to be added to the where clause equality check.
      *              If the value is null, it will be replaced by a non-null placeholder used in the
      *              table for empty/null values.
+     * @param selectionArgs String list which collects the input selection param.
      */
     private static void addWhereClause(
             @NonNull SelectSQLiteQueryBuilder queryBuilder,
             @NonNull String columnName,
-            @Nullable String value) {
+            @Nullable String value,
+            @NonNull List<String> selectionArgs) {
         value = getValueOrPlaceholder(value);
         queryBuilder.appendWhereStandalone(String.format(Locale.ROOT,
-                " %s = '%s' ", columnName, value));
+                " %s = ? ", columnName));
+        selectionArgs.add(value);
     }
 
     /**
