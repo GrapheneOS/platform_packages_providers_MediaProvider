@@ -652,7 +652,8 @@ public class LocalCallingIdentity {
 
     /** System internals or callers holding permission have no redaction */
     private boolean isRedactionNeededInternal(boolean isTargetSdkAtLeastT) {
-        if (hasPermission(PERMISSION_IS_SELF) || hasPermission(PERMISSION_IS_SHELL)) {
+        if (hasPermission(PERMISSION_IS_SELF) || hasPermission(PERMISSION_IS_SHELL)
+                || hasPermission(PERMISSION_IS_DOCUMENTS_MANAGER)) {
             return false;
         }
 
