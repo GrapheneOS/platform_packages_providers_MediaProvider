@@ -27,6 +27,7 @@ import android.os.Bundle
 import android.os.UserHandle
 import android.provider.MediaStore
 import android.util.Log
+import android.view.WindowManager
 import androidx.activity.ComponentActivity
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.SystemBarStyle
@@ -175,6 +176,9 @@ class MainActivity : Hilt_MainActivity() {
     @OptIn(ExperimentalFoundationApi::class)
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
+        window.addSystemFlags(
+            WindowManager.LayoutParams.SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS
+        )
 
         // [ACTION_GET_CONTENT]: Check to see if Photopicker should handle this session, or if the
         // user should instead be referred to [com.android.documentsui]. This is necessary because

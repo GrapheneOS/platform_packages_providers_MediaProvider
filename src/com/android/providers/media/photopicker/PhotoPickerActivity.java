@@ -177,6 +177,8 @@ public class PhotoPickerActivity extends AppCompatActivity {
         EdgeToEdge.enable(this);
 
         super.onCreate(savedInstanceState);
+        getWindow().addSystemFlags(
+                WindowManager.LayoutParams.SYSTEM_FLAG_HIDE_NON_SYSTEM_OVERLAY_WINDOWS);
 
         setContentView(R.layout.activity_photo_picker);
         mToolbar = findViewById(R.id.toolbar);
