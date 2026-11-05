@@ -42,6 +42,9 @@
   -->
   <uses-permission android:name="android.permission.QUERY_ALL_PACKAGES"/>
 
+  <!-- Required to hide non-system overlay windows while Photopicker is displayed -->
+  <uses-permission android:name="android.permission.HIDE_NON_SYSTEM_OVERLAY_WINDOWS"/>
+
   <application
           android:name="com.android.photopicker.PhotopickerApplication"
           android:icon="@mipmap/photopicker_app_icon"
